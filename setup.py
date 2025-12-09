@@ -232,7 +232,11 @@ if __name__ == '__main__':
                              "line_profiler/timers.c",
                              "line_profiler/c_trace_callbacks.c"],
                     language="c++",
-                    define_macros=[("CYTHON_TRACE", (1 if os.getenv("DEV") == "true" else 0))],
+                    define_macros=[
+                        ("CYTHON_TRACE", (1 if os.getenv("DEV") == "true" else 0)),
+                        ("Py_LIMITED_API", "0x03080000"),
+                    ],
+                    py_limited_api=True,
                 ),
                 compiler_directives={
                     "language_level": 3,

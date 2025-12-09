@@ -3,33 +3,58 @@
 #ifndef LINE_PROFILER_PYTHON_WRAPPER_H
 #define LINE_PROFILER_PYTHON_WRAPPER_H
 
+// Opt into the stable ABI starting at Python 3.8
+#ifndef Py_LIMITED_API
+#  define Py_LIMITED_API 0x03080000
+#endif
+
 #include "Python.h"
 
-// Ensure PyFrameObject availability as a concretely declared struct
-
-// _frame -> PyFrameObject
-#if PY_VERSION_HEX >= 0x030b00a6  // 3.11.0a6
-#   ifndef Py_BUILD_CORE
-#       define Py_BUILD_CORE 1
-#   endif
-#   include "internal/pycore_frame.h"
-#   include "cpython/code.h"
-#   include "pyframe.h"
-#else
-#   include "frameobject.h"
-#endif
+// Ensure the opaque PyFrameObject / PyCodeObject types are declared.
+// With the stable ABI these are opaque, so avoid peeking into their
+// internals and use public accessors instead.
+#include "frameobject.h"
 
 // Backport of Python 3.9 caller hooks
 
-#if PY_VERSION_HEX < 0x030900a4  // 3.9.0a4
+#ifndef PyObject_CallOneArg
 #   define PyObject_CallOneArg(func, arg) \
         PyObject_CallFunctionObjArgs(func, arg, NULL)
+#endif
+#ifndef PyObject_CallMethodOneArg
 #   define PyObject_CallMethodOneArg(obj, name, arg) \
         PyObject_CallMethodObjArgs(obj, name, arg, NULL)
+#endif
+#ifndef PyObject_CallNoArgs
 #   define PyObject_CallNoArgs(func) \
         PyObject_CallFunctionObjArgs(func, NULL)
+#endif
+#ifndef PyObject_CallMethodNoArgs
 #   define PyObject_CallMethodNoArgs(obj, name) \
         PyObject_CallMethodObjArgs(obj, name, NULL)
+#endif
+
+#ifndef PyTrace_CALL
+#   define PyTrace_CALL 0
+#   define PyTrace_EXCEPTION 1
+#   define PyTrace_LINE 2
+#   define PyTrace_RETURN 3
+#   define PyTrace_OPCODE 4
+#   define PyTrace_C_CALL 5
+#   define PyTrace_C_EXCEPTION 6
+#   define PyTrace_C_RETURN 7
+#endif
+
+#ifndef Py_tracefunc
+typedef int (*Py_tracefunc)(PyObject *, PyFrameObject *, int, PyObject *);
+#endif
+
+#ifndef PyEval_SetTrace
+PyAPI_FUNC(void) PyEval_SetTrace(Py_tracefunc func, PyObject *arg);
+#endif
+
+#ifndef PyCode_Addr2Line
+PyAPI_FUNC(int) PyCode_Addr2Line(PyCodeObject *co, int byte_offset);
 #endif
 
 #if PY_VERSION_HEX < 0x030900a5  // 3.9.0a5
@@ -47,12 +72,11 @@
 #   define PyFrame_GetCode(x) PyFrame_GetCode_backport(x)
     inline PyCodeObject *PyFrame_GetCode_backport(PyFrameObject *frame)
     {
-        PyCodeObject *code;
-        assert(frame != NULL);
-        code = frame->f_code;
-        assert(code != NULL);
-        Py_INCREF(code);
-        return code;
+        PyObject *code_obj = PyObject_GetAttrString((PyObject *)frame, "f_code");
+        if (code_obj == NULL) {
+            return NULL;
+        }
+        return (PyCodeObject *)code_obj;
     }
 #endif
 
@@ -67,15 +91,8 @@
      */
     inline PyObject *PyCode_GetCode(PyCodeObject *code)
     {
-        PyObject *code_bytes;
         if (code == NULL) return NULL;
-#       if PY_VERSION_HEX < 0x030b00a7  // 3.11.0a7
-            code_bytes = code->co_code;
-            Py_XINCREF(code_bytes);
-#       else
-            code_bytes = PyObject_GetAttrString(code, "co_code");
-#       endif
-        return code_bytes;
+        return PyObject_GetAttrString((PyObject *)code, "co_code");
     }
 #endif
 

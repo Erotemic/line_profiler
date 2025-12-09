@@ -20,6 +20,7 @@ target_include_directories(${module_name} PUBLIC
   ${PYTHON_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}  # for the pure c files defined here
 )
+target_compile_definitions(${module_name} PRIVATE Py_LIMITED_API=0x03080000)
 
 # Transform the C++ library into an importable python module
 python_extension_module(${module_name})
