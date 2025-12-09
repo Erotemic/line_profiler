@@ -295,6 +295,9 @@ if __name__ == '__main__':
     # the wheel
     setupkw["include_package_data"] = True
     setupkw['keywords'] = ['timing', 'timer', 'profiling', 'profiler', 'line_profiler']
+    setupkw.setdefault("options", {})
+    setupkw["options"].setdefault("bdist_wheel", {})
+    setupkw["options"]["bdist_wheel"].setdefault("py_limited_api", "cp38")
     setupkw["classifiers"] = [
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
