@@ -10,10 +10,14 @@
 
 #include "Python.h"
 
-// Ensure the opaque PyFrameObject / PyCodeObject types are declared.
-// With the stable ABI these are opaque, so avoid peeking into their
-// internals and use public accessors instead.
-#include "frameobject.h"
+// Under the stable ABI the concrete frame / code structs are opaque. Python
+// 3.8's limited headers do not expose the forward declarations, so provide
+// aliases in that case only. Newer versions ship the typedefs even under the
+// limited API, so avoid redefining them to prevent conflicts.
+#if defined(Py_LIMITED_API) && PY_VERSION_HEX < 0x03090000
+typedef PyObject PyFrameObject;
+typedef PyObject PyCodeObject;
+#endif
 
 // Backport of Python 3.9 caller hooks
 
