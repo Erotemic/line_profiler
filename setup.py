@@ -232,7 +232,11 @@ if __name__ == '__main__':
                              "line_profiler/timers.c",
                              "line_profiler/c_trace_callbacks.c"],
                     language="c++",
-                    define_macros=[("CYTHON_TRACE", (1 if os.getenv("DEV") == "true" else 0))],
+                    define_macros=[
+                        ("CYTHON_TRACE", (1 if os.getenv("DEV") == "true" else 0)),
+                        ("Py_LIMITED_API", "0x03080000"),
+                    ],
+                    py_limited_api=True,
                 ),
                 compiler_directives={
                     "language_level": 3,
@@ -291,6 +295,9 @@ if __name__ == '__main__':
     # the wheel
     setupkw["include_package_data"] = True
     setupkw['keywords'] = ['timing', 'timer', 'profiling', 'profiler', 'line_profiler']
+    setupkw.setdefault("options", {})
+    setupkw["options"].setdefault("bdist_wheel", {})
+    setupkw["options"]["bdist_wheel"].setdefault("py_limited_api", "cp38")
     setupkw["classifiers"] = [
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',

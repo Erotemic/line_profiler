@@ -19,13 +19,17 @@ TraceCallback *alloc_callback()
         "failed to allocate memory for storing the existing "
         "`sys` trace callback"
     );
+    callback->trace_callable = NULL;
     return callback;
 }
 
 void free_callback(TraceCallback *callback)
 {
     /* Free a heap-allocated `TraceCallback`. */
-    if (callback != NULL) free(callback);
+    if (callback != NULL) {
+        Py_XDECREF(callback->trace_callable);
+        free(callback);
+    }
     return;
 }
 
@@ -36,13 +40,19 @@ void populate_callback(TraceCallback *callback)
      */
     // Shouldn't happen, but just to be safe
     if (callback == NULL) return;
-    // No need to `Py_DECREF()` the thread callback, since it isn't a
-    // `PyObject`
-    PyThreadState *thread_state = PyThreadState_Get();
-    callback->c_tracefunc = thread_state->c_tracefunc;
-    callback->c_traceobj = thread_state->c_traceobj;
-    // No need for NULL check with `Py_XINCREF()`
-    Py_XINCREF(callback->c_traceobj);
+    // The limited API does not expose the C-level trace callback, so
+    // mirror the behaviour of ``sys.gettrace()``.
+    PyObject *sys_mod = PyImport_ImportModule("sys");
+    if (sys_mod != NULL) {
+        PyObject *getter = PyObject_GetAttrString(sys_mod, "gettrace");
+        if (getter != NULL) {
+            PyObject *callable = PyObject_CallNoArgs(getter);
+            Py_XINCREF(callable);
+            callback->trace_callable = callable;
+            Py_DECREF(getter);
+        }
+        Py_DECREF(sys_mod);
+    }
     return;
 }
 
@@ -50,9 +60,8 @@ void nullify_callback(TraceCallback *callback)
 {
     if (callback == NULL) return;
     // No need for NULL check with `Py_XDECREF()`
-    Py_XDECREF(callback->c_traceobj);
-    callback->c_tracefunc = NULL;
-    callback->c_traceobj = NULL;
+    Py_XDECREF(callback->trace_callable);
+    callback->trace_callable = NULL;
     return;
 }
 
@@ -64,7 +73,18 @@ void restore_callback(TraceCallback *callback)
      */
     // Shouldn't happen, but just to be safe
     if (callback == NULL) return;
-    PyEval_SetTrace(callback->c_tracefunc, callback->c_traceobj);
+    if (callback->trace_callable != NULL && callback->trace_callable != Py_None) {
+        PyObject *sys_mod = PyImport_ImportModule("sys");
+        if (sys_mod != NULL) {
+            PyObject *setter = PyObject_GetAttrString(sys_mod, "settrace");
+            if (setter != NULL) {
+                PyObject *res = PyObject_CallOneArg(setter, callback->trace_callable);
+                Py_XDECREF(res);
+                Py_DECREF(setter);
+            }
+            Py_DECREF(sys_mod);
+        }
+    }
     nullify_callback(callback);
     return;
 }
@@ -73,8 +93,8 @@ inline int is_null_callback(TraceCallback *callback)
 {
     return (
         callback == NULL
-        || callback->c_tracefunc == NULL
-        || callback->c_traceobj == NULL
+        || callback->trace_callable == NULL
+        || callback->trace_callable == Py_None
     );
 }
 
@@ -114,18 +134,50 @@ int call_callback(
      *     much like how we call the cached callback via
      *     `python_trace_callback()`.
      */
-    TraceCallback before, after;
-    PyObject *mod = NULL, *dle = NULL, *f_trace = NULL;
-    char f_trace_lines;
+    TraceCallback before = {0}, after = {0};
+    PyObject *f_trace = NULL;
+    PyObject *f_trace_lines_obj = NULL;
+    int f_trace_lines = 0;
     int result;
 
     if (is_null_callback(callback)) return 0;
 
-    f_trace_lines = py_frame->f_trace_lines;
+    f_trace_lines_obj = PyObject_GetAttrString((PyObject *)py_frame, "f_trace_lines");
+    if (f_trace_lines_obj != NULL) {
+        f_trace_lines = PyObject_IsTrue(f_trace_lines_obj);
+    }
     populate_callback(&before);
-    result = (callback->c_tracefunc)(
-        callback->c_traceobj, py_frame, what, arg
-    );
+    if (callback->trace_callable != NULL && callback->trace_callable != Py_None) {
+        PyObject *event = NULL;
+        switch (what) {
+            case PyTrace_CALL: event = PyUnicode_FromString("call"); break;
+            case PyTrace_EXCEPTION: event = PyUnicode_FromString("exception"); break;
+            case PyTrace_LINE: event = PyUnicode_FromString("line"); break;
+            case PyTrace_RETURN: event = PyUnicode_FromString("return"); break;
+#ifdef PyTrace_OPCODE
+            case PyTrace_OPCODE: event = PyUnicode_FromString("opcode"); break;
+#endif
+            case PyTrace_C_CALL: event = PyUnicode_FromString("c_call"); break;
+            case PyTrace_C_EXCEPTION: event = PyUnicode_FromString("c_exception"); break;
+            case PyTrace_C_RETURN: event = PyUnicode_FromString("c_return"); break;
+            default: event = PyUnicode_FromString("call"); break;
+        }
+        PyObject *call_result = PyObject_CallFunctionObjArgs(
+            callback->trace_callable,
+            (PyObject *)py_frame,
+            event,
+            arg,
+            NULL);
+        if (call_result == NULL) {
+            result = -1;
+        } else {
+            Py_DECREF(call_result);
+            result = 0;
+        }
+        Py_XDECREF(event);
+    } else {
+        result = 0;
+    }
 
     // Check if the callback has unset itself; if so, nullify `callback`
     populate_callback(&after);
@@ -136,36 +188,32 @@ int call_callback(
     // Check if a callback has disabled future line events for the
     // frame, and if so, revert the change while withholding future line
     // events from the callback
-    if (
-        !(py_frame->f_trace_lines)
-        && f_trace_lines != py_frame->f_trace_lines
-    )
+    Py_XDECREF(f_trace_lines_obj);
+    f_trace_lines_obj = PyObject_GetAttrString((PyObject *)py_frame, "f_trace_lines");
+    if (f_trace_lines_obj != NULL && !PyObject_IsTrue(f_trace_lines_obj) && f_trace_lines)
     {
-        py_frame->f_trace_lines = f_trace_lines;
-        if (py_frame->f_trace != NULL && py_frame->f_trace != Py_None)
+        PyObject *current_f_trace = PyObject_GetAttrString((PyObject *)py_frame, "f_trace");
+        PyObject *bool_obj = f_trace_lines ? Py_True : Py_False;
+        PyObject_SetAttrString((PyObject *)py_frame, "f_trace_lines", bool_obj);
+        if (current_f_trace != NULL && current_f_trace != Py_None)
         {
-            // Note: DON'T `Py_[X]DECREF()` the pointer! Nothing else is
-            // holding a reference to it.
-            f_trace = PyObject_CallOneArg(disabler, py_frame->f_trace);
+            f_trace = PyObject_CallOneArg(disabler, current_f_trace);
             if (f_trace == NULL)
             {
-                // No need to raise another exception, it's already
-                // raised in the call
                 result = -1;
+                Py_XDECREF(current_f_trace);
                 goto cleanup;
             }
-            // No need to raise another exception, it's already
-            // raised in the call
             if (PyObject_SetAttrString(
                 (PyObject *)py_frame, "f_trace", f_trace))
             {
                 result = -1;
             }
         }
+        Py_XDECREF(current_f_trace);
     }
 cleanup:
-    Py_XDECREF(mod);
-    Py_XDECREF(dle);
+    Py_XDECREF(f_trace_lines_obj);
     return result;
 }
 
@@ -183,14 +231,15 @@ inline void set_local_trace(PyObject *manager, PyFrameObject *py_frame)
      *     Python object to non-numeric non-Python type" error.
      */
     PyObject *method = NULL;
+    PyObject *current_trace = NULL;
     if (manager == NULL || py_frame == NULL) goto cleanup;
     // No-op
-    if (py_frame->f_trace == manager) goto cleanup;
+    current_trace = PyObject_GetAttrString((PyObject *)py_frame, "f_trace");
+    if (current_trace == manager) goto cleanup;
     // No local trace function to wrap, just assign `manager`
-    if (py_frame->f_trace == NULL || py_frame->f_trace == Py_None)
+    if (current_trace == NULL || current_trace == Py_None)
     {
-        Py_INCREF(manager);
-        py_frame->f_trace = manager;
+        PyObject_SetAttrString((PyObject *)py_frame, "f_trace", manager);
         goto cleanup;
     }
     // Wrap the trace function
@@ -199,20 +248,16 @@ inline void set_local_trace(PyObject *manager, PyFrameObject *py_frame)
     method = PyUnicode_FromString("wrap_local_f_trace");
     PyObject_SetAttrString(
         (PyObject *)py_frame, "f_trace",
-        PyObject_CallMethodOneArg(manager, method, py_frame->f_trace));
+        PyObject_CallMethodOneArg(manager, method, current_trace));
 cleanup:
     Py_XDECREF(method);
+    Py_XDECREF(current_trace);
     return;
 }
 
 inline Py_uintptr_t monitoring_restart_version()
-#if PY_VERSION_HEX >= 0x030c00b1  // 3.12.0b1
 {
-    /* Get the `.last_restart_version` of the interpretor state.
-     */
-    return PyThreadState_GetInterpreter(
-        PyThreadState_Get())->last_restart_version;
+    // The stable ABI does not expose interpreter internals; return a
+    // sentinel value indicating the version is unknown.
+    return (Py_uintptr_t)0;
 }
-#else
-{ return (Py_uintptr_t)0; }  // Dummy implementation
-#endif

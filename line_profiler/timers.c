@@ -1,3 +1,7 @@
+// Opt into the stable ABI for Python 3.8+
+#ifndef Py_LIMITED_API
+#  define Py_LIMITED_API 0x03080000
+#endif
 #include "Python.h"
 
 /* The following timer code comes from Python 2.5.2's _lsprof.c */
@@ -55,6 +59,7 @@ hpTimerUnit(void)
 
 #include <sys/resource.h>
 #include <sys/times.h>
+#include <time.h>
 
 PY_LONG_LONG
 hpTimer(void)
