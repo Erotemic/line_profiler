@@ -61,6 +61,23 @@ PyAPI_FUNC(void) PyEval_SetTrace(Py_tracefunc func, PyObject *arg);
 PyAPI_FUNC(int) PyCode_Addr2Line(PyCodeObject *co, int byte_offset);
 #endif
 
+#ifndef PyFrame_GetLineNumber
+    inline int PyFrame_GetLineNumber(PyFrameObject *frame)
+    {
+        PyObject *lineno_obj = NULL;
+        long lineno = -1;
+
+        lineno_obj = PyObject_GetAttrString((PyObject *)frame, "f_lineno");
+        if (lineno_obj == NULL) {
+            return -1;
+        }
+
+        lineno = PyLong_AsLong(lineno_obj);
+        Py_DECREF(lineno_obj);
+        return (int)lineno;
+    }
+#endif
+
 #if PY_VERSION_HEX < 0x030900a5  // 3.9.0a5
 #   define PyThreadState_GetInterpreter(tstate) \
         ((tstate)->interp)
