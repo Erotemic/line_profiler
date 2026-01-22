@@ -272,6 +272,7 @@ class GlobalProfiler:
         self._config = config_source.path
 
         self._profile = None
+        self._owner_pid = None
         self.enabled = None
         # Configs:
         # - How to toggle the profiler
@@ -329,6 +330,7 @@ class GlobalProfiler:
         # PID marker was inherited from another process environment.
         owner_pid = os.getpid()
         os.environ[_OWNER_PID_ENVVAR] = str(owner_pid)
+        self._owner_pid = owner_pid
 
         if self._profile is None:
             # Try to only ever create one real LineProfiler object
@@ -407,6 +409,8 @@ class GlobalProfiler:
         If the implicit setup triggered, then this will be called by
         :py:mod:`atexit`.
         """
+        if self._owner_pid is not None and os.getpid() != self._owner_pid:
+            return
         import io
         import pathlib
 
