@@ -166,11 +166,18 @@ The core functionality in this module was ported from :mod:`xdev`.
 import atexit
 import multiprocessing
 import os
+import pathlib
 import sys
 # This is for compatibility
 from .cli_utils import boolean, get_python_executable as _python_command
 from .line_profiler import LineProfiler
 from .toml_config import ConfigSource
+
+# The first process that enables profiling records its PID here. Child processes
+# created via multiprocessing (spawn/forkserver) inherit this environment value,
+# which helps prevent helper processes from claiming ownership and clobbering
+# output. Standalone subprocess runs should always be able to reset this value.
+_OWNER_PID_ENVVAR = 'LINE_PROFILER_OWNER_PID'
 
 
 class GlobalProfiler:
@@ -312,17 +319,16 @@ class GlobalProfiler:
         """
         # When using multiprocessing start methods like 'spawn'/'forkserver',
         # helper processes may import this module. Only register the atexit
-        # reporting hook (and enable profiling) in the main process to prevent
-        # duplicate/out-of-order output.
-        is_mp_child = False
-        try:
-            is_mp_child = multiprocessing.parent_process() is not None
-        except Exception:
-            is_mp_child = False
-
-        if is_mp_child:
+        # reporting hook (and enable profiling) in real script invocations to
+        # prevent duplicate/out-of-order output.
+        if self._is_helper_process_context():
             self.enabled = False
             return
+
+        # Standalone script executions should always claim ownership, even if a
+        # PID marker was inherited from another process environment.
+        owner_pid = os.getpid()
+        os.environ[_OWNER_PID_ENVVAR] = str(owner_pid)
 
         if self._profile is None:
             # Try to only ever create one real LineProfiler object
@@ -335,6 +341,35 @@ class GlobalProfiler:
 
         if output_prefix is not None:
             self.output_prefix = output_prefix
+
+    def _is_helper_process_context(self):
+        """
+        Determine if this process looks like a multiprocessing helper.
+
+        Helper contexts should never register atexit hooks or claim ownership,
+        while real script invocations should always be allowed to do so.
+        """
+        argv0 = sys.argv[0] if sys.argv else ''
+        if argv0 == '-c':
+            return True
+
+        try:
+            if multiprocessing.current_process().name != 'MainProcess':
+                return True
+        except Exception:
+            pass
+
+        main_mod = sys.modules.get('__main__')
+        main_file = getattr(main_mod, '__file__', None)
+        for candidate in (argv0, main_file):
+            if candidate:
+                try:
+                    if pathlib.Path(candidate).exists():
+                        return False
+                except Exception:
+                    continue
+
+        return True
 
     def disable(self):
         """
