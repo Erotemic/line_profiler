@@ -164,18 +164,13 @@ for ``func2`` and ``func4``.
 The core functionality in this module was ported from :mod:`xdev`.
 """
 import atexit
+import multiprocessing
 import os
 import sys
 # This is for compatibility
 from .cli_utils import boolean, get_python_executable as _python_command
 from .line_profiler import LineProfiler
 from .toml_config import ConfigSource
-
-# The first process that enables profiling records its PID here. Child processes
-# created via multiprocessing (spawn/forkserver) inherit this environment value,
-# allowing them to avoid registering duplicate atexit hooks (which can print
-# output after the parent exits and/or clobber output files).
-_OWNER_PID_ENVVAR = 'LINE_PROFILER_OWNER_PID'
 
 
 class GlobalProfiler:
@@ -271,8 +266,6 @@ class GlobalProfiler:
 
         self._profile = None
         self.enabled = None
-        self._owner_pid = None
-
         # Configs:
         # - How to toggle the profiler
         self.setup_config = config_source.conf_dict['setup']
@@ -318,23 +311,16 @@ class GlobalProfiler:
         Explicitly enables global profiler and controls its settings.
         """
         # When using multiprocessing start methods like 'spawn'/'forkserver',
-        # helper processes may import this module. We only register the atexit
-        # reporting hook (and enable profiling) in the first process that
-        # called enable(), to prevent duplicate/out-of-order output.
-        owner = os.environ.get(_OWNER_PID_ENVVAR)
-        if owner is None:
-            owner_pid = os.getpid()
-            os.environ[_OWNER_PID_ENVVAR] = str(owner_pid)
-        else:
-            try:
-                owner_pid = int(owner)
-            except Exception:
-                owner_pid = os.getpid()
-                os.environ[_OWNER_PID_ENVVAR] = str(owner_pid)
-        self._owner_pid = owner_pid
+        # helper processes may import this module. Only register the atexit
+        # reporting hook (and enable profiling) in the main process to prevent
+        # duplicate/out-of-order output.
+        is_mp_child = False
+        try:
+            is_mp_child = multiprocessing.parent_process() is not None
+        except Exception:
+            is_mp_child = False
 
-        # Only enable + register atexit in the owner process.
-        if os.getpid() != owner_pid:
+        if is_mp_child:
             self.enabled = False
             return
 
