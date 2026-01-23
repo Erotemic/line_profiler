@@ -364,6 +364,13 @@ class GlobalProfiler:
             self._debug('helper:forkserver-env', argv0=argv0)
             return True
         try:
+            import multiprocessing.spawn as mp_spawn
+            if getattr(mp_spawn, '_inheriting', False):
+                self._debug('helper:spawn-inheriting', argv0=argv0)
+                return True
+        except Exception:
+            pass
+        try:
             if multiprocessing.current_process().name != 'MainProcess':
                 self._debug(
                     'helper:non-main-process',
@@ -407,7 +414,24 @@ class GlobalProfiler:
             return False
 
         try:
-            skip = int(owner) != os.getpid()
+            owner_pid = int(owner)
+            if os.getppid() == 1 and owner_pid != os.getpid():
+                self._debug('owner:skip-orphan', owner=owner, ppid=os.getppid())
+                return True
+            if os.getppid() == owner_pid and owner_pid != os.getpid():
+                try:
+                    start_method = multiprocessing.get_start_method(allow_none=True)
+                except Exception:
+                    start_method = None
+                if start_method == 'forkserver':
+                    self._debug(
+                        'owner:skip-forkserver-child',
+                        owner=owner,
+                        ppid=os.getppid(),
+                        start_method=start_method,
+                    )
+                    return True
+            skip = owner_pid != os.getpid()
             self._debug('owner:check', owner=owner, skip=skip)
             return skip
         except Exception:
@@ -479,6 +503,10 @@ class GlobalProfiler:
         :py:mod:`atexit`.
         """
         self._debug('show:enter')
+        owner_env = os.environ.get(_OWNER_PID_ENVVAR)
+        if os.getppid() == 1 and owner_env == str(os.getpid()):
+            self._debug('show:skip-orphan-owner', owner_env=owner_env)
+            return
         if self._owner_pid is not None and os.getpid() != self._owner_pid:
             self._debug('show:skip-non-owner', current_pid=os.getpid())
             return

@@ -190,9 +190,6 @@ def test_explicit_profile_process_pool_forkserver():
                 from concurrent.futures import ProcessPoolExecutor
                 from line_profiler import profile
 
-                if 'forkserver' in mp.get_all_start_methods():
-                    mp.set_start_method('forkserver', force=True)
-
                 def worker(x):
                     return x * x
 
@@ -205,7 +202,13 @@ def test_explicit_profile_process_pool_forkserver():
                         list(ex.map(worker, range(4)))
                     return total
 
-                run()
+                def main():
+                    if 'forkserver' in mp.get_all_start_methods():
+                        mp.set_start_method('forkserver', force=True)
+                    run()
+
+                if __name__ == '__main__':
+                    main()
                 ''').strip())
 
             args = [sys.executable, os.fspath(script_fpath)]
