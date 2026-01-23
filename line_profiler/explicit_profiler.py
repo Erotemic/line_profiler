@@ -326,6 +326,10 @@ class GlobalProfiler:
             self.enabled = False
             return
 
+        if self._should_skip_due_to_owner():
+            self.enabled = False
+            return
+
         # Standalone script executions should always claim ownership, even if a
         # PID marker was inherited from another process environment.
         owner_pid = os.getpid()
@@ -352,9 +356,6 @@ class GlobalProfiler:
         while real script invocations should always be allowed to do so.
         """
         argv0 = sys.argv[0] if sys.argv else ''
-        if argv0 == '-c':
-            return True
-
         try:
             if multiprocessing.current_process().name != 'MainProcess':
                 return True
@@ -372,6 +373,28 @@ class GlobalProfiler:
                     continue
 
         return True
+
+    def _should_skip_due_to_owner(self):
+        """
+        In multiprocessing children, respect an inherited owner marker.
+
+        Standalone subprocesses (parent_process is None) should reset ownership,
+        but fork/spawn children should not clobber a parent owner's outputs.
+        """
+        try:
+            if multiprocessing.parent_process() is None:
+                return False
+        except Exception:
+            return False
+
+        owner = os.environ.get(_OWNER_PID_ENVVAR)
+        if owner is None:
+            return False
+
+        try:
+            return int(owner) != os.getpid()
+        except Exception:
+            return False
 
     def disable(self):
         """

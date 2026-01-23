@@ -141,6 +141,31 @@ def test_explicit_profile_with_environ_on():
         assert (temp_dpath / 'profile_output.lprof').exists()
 
 
+def test_explicit_profile_ignores_inherited_owner_marker():
+    """
+    Standalone runs should not be blocked by an inherited owner marker.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        temp_dpath = ub.Path(tmp)
+        env = os.environ.copy()
+        env['LINE_PROFILE'] = '1'
+        env['LINE_PROFILER_OWNER_PID'] = str(os.getpid() + 100000)
+
+        with ub.ChDir(temp_dpath):
+
+            script_fpath = ub.Path('script.py')
+            script_fpath.write_text(_demo_explicit_profile_script())
+
+            args = [sys.executable, os.fspath(script_fpath)]
+            proc = ub.cmd(args, env=env)
+            print(proc.stdout)
+            print(proc.stderr)
+            proc.check_returncode()
+
+        assert (temp_dpath / 'profile_output.txt').exists()
+        assert (temp_dpath / 'profile_output.lprof').exists()
+
+
 def test_explicit_profile_with_environ_off():
     """
     When LINE_PROFILE is falsy, profiling should not run.
