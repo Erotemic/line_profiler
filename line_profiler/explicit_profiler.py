@@ -318,15 +318,18 @@ class GlobalProfiler:
         """
         Explicitly enables global profiler and controls its settings.
         """
+        self._debug('enable:enter')
         # When using multiprocessing start methods like 'spawn'/'forkserver',
         # helper processes may import this module. Only register the atexit
         # reporting hook (and enable profiling) in real script invocations to
         # prevent duplicate/out-of-order output.
         if self._is_helper_process_context():
+            self._debug('enable:helper-context')
             self.enabled = False
             return
 
         if self._should_skip_due_to_owner():
+            self._debug('enable:skip-due-to-owner')
             self.enabled = False
             return
 
@@ -335,6 +338,7 @@ class GlobalProfiler:
         owner_pid = os.getpid()
         os.environ[_OWNER_PID_ENVVAR] = str(owner_pid)
         self._owner_pid = owner_pid
+        self._debug('enable:owner-claimed', owner_pid=owner_pid)
 
         if self._profile is None:
             # Try to only ever create one real LineProfiler object
@@ -356,8 +360,16 @@ class GlobalProfiler:
         while real script invocations should always be allowed to do so.
         """
         argv0 = sys.argv[0] if sys.argv else ''
+        if self._has_forkserver_env():
+            self._debug('helper:forkserver-env', argv0=argv0)
+            return True
         try:
             if multiprocessing.current_process().name != 'MainProcess':
+                self._debug(
+                    'helper:non-main-process',
+                    process_name=multiprocessing.current_process().name,
+                    argv0=argv0,
+                )
                 return True
         except Exception:
             pass
@@ -368,10 +380,12 @@ class GlobalProfiler:
             if candidate:
                 try:
                     if pathlib.Path(candidate).exists():
+                        self._debug('helper:script-detected', candidate=candidate)
                         return False
                 except Exception:
                     continue
 
+        self._debug('helper:no-script-detected', argv0=argv0, main_file=main_file)
         return True
 
     def _should_skip_due_to_owner(self):
@@ -383,6 +397,7 @@ class GlobalProfiler:
         """
         try:
             if multiprocessing.parent_process() is None:
+                self._debug('owner:no-parent', owner=os.environ.get(_OWNER_PID_ENVVAR))
                 return False
         except Exception:
             return False
@@ -392,9 +407,40 @@ class GlobalProfiler:
             return False
 
         try:
-            return int(owner) != os.getpid()
+            skip = int(owner) != os.getpid()
+            self._debug('owner:check', owner=owner, skip=skip)
+            return skip
         except Exception:
             return False
+
+    def _has_forkserver_env(self):
+        for key in os.environ:
+            if key.startswith('FORKSERVER_'):
+                return True
+            if key.startswith('MULTIPROCESSING_FORKSERVER'):
+                return True
+        return False
+
+    def _debug(self, message, **extra):
+        if not os.environ.get('LINE_PROFILER_DEBUG'):
+            return
+        try:
+            parent = multiprocessing.parent_process()
+            parent_pid = parent.pid if parent is not None else None
+        except Exception:
+            parent_pid = None
+        info = {
+            'pid': os.getpid(),
+            'ppid': os.getppid(),
+            'process': getattr(multiprocessing.current_process(), 'name', None),
+            'parent_pid': parent_pid,
+            'owner_env': os.environ.get(_OWNER_PID_ENVVAR),
+            'owner_pid': self._owner_pid,
+            'enabled': self.enabled,
+        }
+        info.update(extra)
+        payload = ' '.join(f'{k}={v!r}' for k, v in info.items())
+        print(f'[line_profiler debug] {message} {payload}')
 
     def disable(self):
         """
@@ -432,7 +478,9 @@ class GlobalProfiler:
         If the implicit setup triggered, then this will be called by
         :py:mod:`atexit`.
         """
+        self._debug('show:enter')
         if self._owner_pid is not None and os.getpid() != self._owner_pid:
+            self._debug('show:skip-non-owner', current_pid=os.getpid())
             return
         import io
         import pathlib
