@@ -55,11 +55,46 @@ if TYPE_CHECKING:  # pragma: no cover
 
 from io import StringIO
 
-from IPython.core.getipython import get_ipython
-from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
-from IPython.core.page import page
-from IPython.utils.ipstruct import Struct
-from IPython.core.error import UsageError
+try:  # pragma: no cover - optional dependency
+    import importlib
+
+    get_ipython = importlib.import_module(
+        'IPython.core.getipython').get_ipython
+    magic_module = importlib.import_module('IPython.core.magic')
+    Magics = magic_module.Magics
+    magics_class = magic_module.magics_class
+    line_magic = magic_module.line_magic
+    cell_magic = magic_module.cell_magic
+    page = importlib.import_module('IPython.core.page').page
+    Struct = importlib.import_module('IPython.utils.ipstruct').Struct
+    UsageError = importlib.import_module('IPython.core.error').UsageError
+except ImportError:  # pragma: no cover - IPython is optional
+    if TYPE_CHECKING:
+        raise
+
+    def get_ipython():
+        return None
+
+    class Magics:
+        pass
+
+    def magics_class(cls):
+        return cls
+
+    def line_magic(func):
+        return func
+
+    def cell_magic(func):
+        return func
+
+    def page(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    class Struct(dict):
+        pass
+
+    class UsageError(Exception):
+        pass
 
 from line_profiler import line_profiler, LineProfiler, LineStats
 from line_profiler.autoprofile.ast_tree_profiler import AstTreeProfiler
@@ -532,7 +567,7 @@ class LineProfilerMagics(Magics):
                 # - `prof.add_function()` might have replaced the code
                 #   object, so retrieve it back from the dummy function
                 mock_func = types.SimpleNamespace(__code__=code)
-                prof.add_function(mock_func)  # type: ignore[arg-type]
+                prof.add_function(mock_func)
                 code = mock_func.__code__
                 # Notes:
                 # - We don't define `ip.user_global_ns` and `ip.user_ns`

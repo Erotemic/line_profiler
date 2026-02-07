@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from typing import Union
+from typing import cast
 
 
 def ast_create_profile_node(
@@ -90,13 +90,12 @@ class AstProfileTransformer(ast.NodeTransformer):
         """
         decor_ids = set()
         for decor in node.decorator_list:
-            try:
+            if isinstance(decor, ast.Name):
                 decor_ids.add(decor.id)
-            except AttributeError:
-                ...
         if self._profiler_name not in decor_ids:
             node.decorator_list.append(ast.Name(id=self._profiler_name, ctx=ast.Load()))
-        return self.generic_visit(node)
+        self.generic_visit(node)
+        return node
 
     visit_FunctionDef = visit_AsyncFunctionDef = _visit_func_def
 
@@ -122,8 +121,9 @@ class AstProfileTransformer(ast.NodeTransformer):
                     returns list containing the import node and the profiling node
         """
         if not self._profile_imports:
-            return self.generic_visit(node)
-        visited = [self.generic_visit(node)]
+            self.generic_visit(node)
+            return node
+        visited = [cast(ast.Import | ast.ImportFrom, self.generic_visit(node))]
         for names in node.names:
             node_name = names.name if names.asname is None else names.asname
             if node_name in self._profiled_imports:
@@ -149,7 +149,8 @@ class AstProfileTransformer(ast.NodeTransformer):
                 if profile_imports is True:
                     returns list containing the import node and the profiling node
         """
-        return self._visit_import(node)
+        return cast(ast.Import | list[ast.Import | ast.Expr],
+                    self._visit_import(node))
 
     def visit_ImportFrom(
             self, node: ast.ImportFrom
@@ -167,4 +168,5 @@ class AstProfileTransformer(ast.NodeTransformer):
                 if profile_imports is True:
                     returns list containing the import node and the profiling node
         """
-        return self._visit_import(node)
+        return cast(ast.ImportFrom | list[ast.ImportFrom | ast.Expr],
+                    self._visit_import(node))

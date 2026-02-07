@@ -11,7 +11,7 @@ import pathlib
 import shutil
 import sys
 from os import PathLike
-from typing import Protocol, Sequence, TypeVar
+from typing import Protocol, Sequence, TypeVar, cast
 from .toml_config import ConfigSource
 
 
@@ -97,7 +97,7 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
         return negated
 
     # Make sure there's at least one positional argument
-    args = [arg, *args]
+    args = (arg, *args)
 
     if kwargs.get('action') not in ('store_true', 'store_false'):
         return parser_like.add_argument(*args, **kwargs)
@@ -138,7 +138,9 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
             'form' if len(short_flags) == 1 else 'forms',
             ', '.join(short_flags))
         if long_kwargs.get('help'):
-            help_text = long_kwargs['help'].strip()
+            raw_help = long_kwargs['help']
+            help_text = raw_help if isinstance(raw_help, str) else str(raw_help)
+            help_text = help_text.strip()
             if help_text.endswith((')', ']')):
                 # Interpolate into existing parenthetical
                 help_text = '{}; {}{}{}'.format(
@@ -186,8 +188,10 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
     return action
 
 
-def get_cli_config(subtable: str, /, *args: object,
-                   **kwargs: object) -> ConfigSource:
+def get_cli_config(
+        subtable: str, /,
+        config: str | PathLike[str] | bool | None = None,
+        *, read_env: bool = True) -> ConfigSource:
     """
     Get the ``tool.line_profiler.<subtable>`` configs and normalize
     its keys (``some-key`` -> ``some_key``).
@@ -204,10 +208,12 @@ def get_cli_config(subtable: str, /, *args: object,
         New :py:class:`~.line_profiler.toml_config.ConfigSource`
         instance
     """
-    config = ConfigSource.from_config(*args, **kwargs).get_subconfig(subtable)
-    config.conf_dict = {key.replace('-', '_'): value
-                        for key, value in config.conf_dict.items()}
-    return config
+    config_source = ConfigSource.from_config(
+        config, read_env=read_env).get_subconfig(subtable)
+    config_source.conf_dict = {
+        key.replace('-', '_'): value
+        for key, value in config_source.conf_dict.items()}
+    return config_source
 
 
 def get_python_executable() -> str:
@@ -217,9 +223,11 @@ def get_python_executable() -> str:
             Command or path thereto corresponding to
             :py:data:`sys.executable`.
     """
-    if os.path.samefile(shutil.which('python'), sys.executable):
+    python_path = shutil.which('python')
+    python3_path = shutil.which('python3')
+    if python_path and os.path.samefile(python_path, sys.executable):
         return 'python'
-    elif os.path.samefile(shutil.which('python3'), sys.executable):
+    elif python3_path and os.path.samefile(python3_path, sys.executable):
         return 'python3'
     else:
         return short_string_path(sys.executable)
@@ -318,11 +326,12 @@ def short_string_path(path: str | PathLike[str]) -> str:
             current directory.
     """
     path = pathlib.Path(path)
-    paths = {str(path)}
+    paths: set[str] = {str(path)}
     abspath = path.absolute()
     paths.add(str(abspath))
     try:
         paths.add(str(abspath.relative_to(path.cwd().absolute())))
     except ValueError:  # Not relative to the curdir
         pass
-    return min(paths, key=len)
+    paths_list = list(paths)
+    return cast(str, min(paths_list, key=len))

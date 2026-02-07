@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import auto
 from types import FunctionType, MappingProxyType, ModuleType
-from typing import Callable, Literal, TypedDict, overload
+from typing import Callable, Literal, TypedDict, cast, overload
 from .line_profiler_utils import StringEnum
 
 
@@ -169,12 +169,12 @@ class ScopingPolicy(StringEnum):
         if obj_type == 'module':
             if is_class:
                 return self._return_const(False)
-            return self._get_module_filter_in_module(namespace)
+            return self._get_module_filter_in_module(cast(ModuleType, namespace))
         if is_class:
-            method = self._get_callable_filter_in_class
-        else:
-            method = self._get_callable_filter_in_module
-        return method(namespace, is_class=(obj_type == 'class'))
+            return self._get_callable_filter_in_class(
+                cast(type, namespace), is_class=(obj_type == 'class'))
+        return self._get_callable_filter_in_module(
+            cast(ModuleType, namespace), is_class=(obj_type == 'class'))
 
     @classmethod
     def to_policies(
@@ -258,7 +258,7 @@ ScopingPolicyDict, None]):
     def _get_callable_filter_in_class(
             self, cls: type, is_class: bool
     ) -> Callable[[FunctionType | type], bool]:
-        def func_is_child(other: FunctionType):
+        def func_is_child(other: FunctionType | type):
             if not modules_are_equal(other):
                 return False
             return other.__qualname__ == f'{cls.__qualname__}.{other.__name__}'
@@ -266,43 +266,49 @@ ScopingPolicyDict, None]):
         def modules_are_equal(other: FunctionType | type):  # = sibling check
             return cls.__module__ == other.__module__
 
-        def func_is_descdendant(other: FunctionType):
+        def func_is_descdendant(other: FunctionType | type):
             if not modules_are_equal(other):
                 return False
             return other.__qualname__.startswith(cls.__qualname__ + '.')
 
-        return {'exact': (self._return_const(False)
-                          if is_class else
-                          func_is_child),
-                'children': func_is_child,
-                'descendants': func_is_descdendant,
-                'siblings': modules_are_equal,
-                'none': self._return_const(True)}[self.value]
+        policies: dict[str, Callable[[FunctionType | type], bool]] = {
+            'exact': (self._return_const(False)
+                      if is_class else
+                      func_is_child),
+            'children': func_is_child,
+            'descendants': func_is_descdendant,
+            'siblings': modules_are_equal,
+            'none': self._return_const(True),
+        }
+        return policies[self.value]
 
     def _get_callable_filter_in_module(
             self, mod: ModuleType, is_class: bool
     ) -> Callable[[FunctionType | type], bool]:
-        def func_is_child(other: FunctionType):
+        def func_is_child(other: FunctionType | type):
             return other.__module__ == mod.__name__
 
-        def func_is_descdendant(other: FunctionType):
+        def func_is_descdendant(other: FunctionType | type):
             return self._match_prefix(other.__module__, mod.__name__)
 
-        def func_is_cousin(other: FunctionType):
+        def func_is_cousin(other: FunctionType | type):
             if func_is_descdendant(other):
                 return True
             return self._match_prefix(other.__module__, parent)
 
         parent, _, basename = mod.__name__.rpartition('.')
-        return {'exact': (self._return_const(False)
-                          if is_class else
-                          func_is_child),
-                'children': func_is_child,
-                'descendants': func_is_descdendant,
-                'siblings': (func_is_cousin  # Only if a pkg
-                             if basename else
-                             func_is_descdendant),
-                'none': self._return_const(True)}[self.value]
+        policies: dict[str, Callable[[FunctionType | type], bool]] = {
+            'exact': (self._return_const(False)
+                      if is_class else
+                      func_is_child),
+            'children': func_is_child,
+            'descendants': func_is_descdendant,
+            'siblings': (func_is_cousin  # Only if a pkg
+                         if basename else
+                         func_is_descdendant),
+            'none': self._return_const(True),
+        }
+        return policies[self.value]
 
     def _get_module_filter_in_module(
             self, mod: ModuleType
@@ -317,13 +323,16 @@ ScopingPolicyDict, None]):
             return other.__name__.startswith(parent + '.')
 
         parent, _, basename = mod.__name__.rpartition('.')
-        return {'exact': self._return_const(False),
-                'children': module_is_child,
-                'descendants': module_is_descendant,
-                'siblings': (module_is_sibling  # Only if a pkg
-                             if basename else
-                             self._return_const(False)),
-                'none': self._return_const(True)}[self.value]
+        policies: dict[str, Callable[[ModuleType], bool]] = {
+            'exact': self._return_const(False),
+            'children': module_is_child,
+            'descendants': module_is_descendant,
+            'siblings': (module_is_sibling  # Only if a pkg
+                         if basename else
+                         self._return_const(False)),
+            'none': self._return_const(True),
+        }
+        return policies[self.value]
 
 
 # Sanity check in case we extended `ScopingPolicy` and forgot to update

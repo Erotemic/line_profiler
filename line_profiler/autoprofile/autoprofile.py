@@ -52,7 +52,7 @@ import operator
 import sys
 import types
 from collections.abc import MutableMapping
-from typing import Any
+from typing import Any, cast
 from .ast_tree_profiler import AstTreeProfiler
 from .run_module import AstTreeModuleProfiler
 from .line_profiler_utils import add_imported_function_or_module
@@ -110,12 +110,13 @@ def run(script_file: str, ns: MutableMapping[str, Any],
 
         def __enter__(self):
             assert self.copy is None
-            self.copy = self.d.copy()
+            self.copy = dict(self.d)
             return self.target
 
         def __exit__(self, *_, **__):
             self.d.clear()
-            self.d.update(self.copy)
+            if self.copy is not None:
+                self.d.update(self.copy)
             self.copy = None
 
     if as_module:
@@ -149,4 +150,4 @@ def run(script_file: str, ns: MutableMapping[str, Any],
     code_obj = compile(tree_profiled, script_file, 'exec')
     with ctx as callback:
         callback()
-        exec(code_obj, namespace, namespace)
+        exec(code_obj, cast(dict[str, Any], namespace), namespace)

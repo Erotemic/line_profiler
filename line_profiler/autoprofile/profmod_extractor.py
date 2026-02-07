@@ -165,8 +165,10 @@ class ProfmodExtractor:
                         module_dict_list.append(module_dict)
                         modname_list.append(modname)
             elif isinstance(node, ast.ImportFrom):
+                if node.module is None:
+                    continue
                 for name in node.names:
-                    modname = node.module + '.' + name.name
+                    modname = f'{node.module}.{name.name}'
                     if modname not in modname_list:
                         alias = name.asname or name.name
                         module_dict = {
@@ -212,6 +214,8 @@ class ProfmodExtractor:
         modname_added_list = []
         for i, module_dict in enumerate(module_dict_list):
             modname = module_dict['name']
+            if not isinstance(modname, str):
+                continue
             if modname in modname_added_list:
                 continue
             """check if either the parent module or submodule are in modnames_to_profile"""

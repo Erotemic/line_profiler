@@ -480,6 +480,7 @@ def write_eager_import_module(
 
     # Get the names loaded by `adder`;
     # these names are not allowed in the namespace
+    assert expr is not None
     forbidden_names = LoadedNameFinder.find(expr)
     # We need three free names:
     # - One for `adder`

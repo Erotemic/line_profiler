@@ -6,7 +6,7 @@ import types
 from functools import cached_property, partial, partialmethod
 from sys import version_info
 from typing import (TYPE_CHECKING, Any, Callable, Mapping, Protocol, TypeVar,
-                    overload)
+                    overload, cast)
 from typing_extensions import ParamSpec, TypeIs
 from warnings import warn
 from ._line_profiler import label
@@ -223,6 +223,12 @@ class ByCountProfilerMixin:
     def wrap_callable(self, func: staticmethod[PS, T_co]) -> staticmethod[PS, T_co]:
         ...
 
+    def enable_by_count(self) -> None:  # pragma: no cover - implemented in C
+        raise NotImplementedError
+
+    def disable_by_count(self) -> None:  # pragma: no cover - implemented in C
+        raise NotImplementedError
+
     def wrap_callable(self, func: object):
         """
         Decorate a function to start the profiler on function entry and
@@ -265,29 +271,35 @@ class ByCountProfilerMixin:
         Returns:
             funcs (list[Callable])
         """
-        return cls._get_underlying_functions(func)
+        return [impl for impl in cls._get_underlying_functions(func)
+                if isinstance(impl, types.FunctionType)]
 
     @classmethod
     def _get_underlying_functions(
             cls, func: object, seen: set[int] | None = None,
-            stop_at_classes: bool = False) -> list[types.FunctionType | type]:
+            stop_at_classes: bool = False
+    ) -> list[types.FunctionType | type | CythonCallable]:
         if seen is None:
             seen = set()
-        kwargs = {'seen': seen, 'stop_at_classes': stop_at_classes}
         # Extract inner functions
-        if any(check(func)
-               for check in (is_boundmethod, is_classmethod, is_staticmethod)):
-            return cls._get_underlying_functions(func.__func__, **kwargs)
-        if any(check(func)
-               for check in (is_partial, is_partialmethod, is_cached_property)):
-            return cls._get_underlying_functions(func.func, **kwargs)
+        if is_boundmethod(func):
+            return cls._get_underlying_functions(
+                func.__func__, seen=seen, stop_at_classes=stop_at_classes)
+        if is_classmethod(func) or is_staticmethod(func):
+            return cls._get_underlying_functions(
+                func.__func__, seen=seen, stop_at_classes=stop_at_classes)
+        if is_partial(func) or is_partialmethod(func) or is_cached_property(func):
+            return cls._get_underlying_functions(
+                func.func, seen=seen, stop_at_classes=stop_at_classes)
         # Dispatch to specific handlers
         if is_property(func):
-            return cls._get_underlying_functions_from_property(func, **kwargs)
+            return cls._get_underlying_functions_from_property(
+                func, seen, stop_at_classes)
         if isinstance(func, type):
             if stop_at_classes:
                 return [func]
-            return cls._get_underlying_functions_from_type(func, **kwargs)
+            return cls._get_underlying_functions_from_type(
+                func, seen, stop_at_classes)
         # Otherwise, the object should either be a function...
         if not callable(func):
             raise TypeError(f'func = {func!r}: '
@@ -305,12 +317,13 @@ class ByCountProfilerMixin:
         func = type(func).__call__
         if is_c_level_callable(func):  # Can happen with builtin types
             return []
-        return [func]
+        return [cast(types.FunctionType, func)]
 
     @classmethod
     def _get_underlying_functions_from_property(
             cls, prop: property, seen: set[int],
-            stop_at_classes: bool) -> list[types.FunctionType | type]:
+            stop_at_classes: bool
+    ) -> list[types.FunctionType | type | CythonCallable]:
         result = []
         for impl in prop.fget, prop.fset, prop.fdel:
             if impl is not None:
@@ -321,7 +334,8 @@ class ByCountProfilerMixin:
     @classmethod
     def _get_underlying_functions_from_type(
             cls, kls: type, seen: set[int],
-            stop_at_classes: bool) -> list[types.FunctionType | type]:
+            stop_at_classes: bool
+    ) -> list[types.FunctionType | type | CythonCallable]:
         result = []
         get_filter = cls._class_scoping_policy.get_filter
         func_check = get_filter(kls, 'func')
@@ -658,4 +672,5 @@ class ByCountProfilerMixin:
         self.disable_by_count()
 
     _profiler_wrapped_marker = '__line_profiler_id__'
-    _class_scoping_policy = ScopingPolicy.CHILDREN
+    _class_scoping_policy: ScopingPolicy = cast(
+        ScopingPolicy, ScopingPolicy.CHILDREN)

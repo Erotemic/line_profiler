@@ -524,7 +524,7 @@ def split_modpath(modpath: str, check: bool = True) -> tuple[str, str]:
 
 def normalize_modpath(
         modpath: str | PathLike, hide_init: bool = True,
-        hide_main: bool = False) -> str | PathLike:
+        hide_main: bool = False) -> str:
     """
     Normalizes __init__ and __main__ paths.
 
@@ -560,6 +560,7 @@ def normalize_modpath(
         >>> assert not res2.endswith('.py')
         >>> assert not res3.endswith('.py')
     """
+    modpath = os.fspath(modpath)
     if hide_init:
         if basename(modpath) == "__init__.py":
             modpath = dirname(modpath)

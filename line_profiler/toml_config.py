@@ -17,7 +17,7 @@ except ImportError:  # Python < 3.11
     import tomli as tomllib  # type: ignore[no-redef] # noqa: F811
 from collections.abc import Mapping
 from os import PathLike
-from typing import Any, Mapping as TypingMapping, Sequence, TypeVar
+from typing import Any, Mapping as TypingMapping, Sequence, TypeVar, cast
 from typing_extensions import Self
 
 
@@ -92,8 +92,9 @@ class ConfigSource:
             >>> assert (display_widths.conf_dict
             ...         is default.conf_dict['show']['column_widths'])
         """
-        new_dict = get_subtable(
-            self.conf_dict, headers, allow_absence=allow_absence)
+        new_dict = cast(
+            dict[str, Any],
+            get_subtable(self.conf_dict, headers, allow_absence=allow_absence))
         new_subtable = [*self.subtable, *headers]
         return type(self)(new_dict, self.path, new_subtable)
 
@@ -125,14 +126,23 @@ class ConfigSource:
 
         global _DEFAULTS
         if _DEFAULTS is None:
-            package = __spec__.name.rpartition('.')[0]
+            if __spec__ is None:
+                package = __name__.rpartition('.')[0]
+            else:
+                package = __spec__.name.rpartition('.')[0]
             with find_file(package + '.rc', 'line_profiler.toml') as path:
-                conf_dict, source = find_and_read_config_file(config=path)
-            conf_dict = get_subtable(conf_dict, NAMESPACE, allow_absence=False)
+                result = find_and_read_config_file(config=path)
+            if result is None:
+                raise FileNotFoundError(
+                    'Default configuration file could not be read')
+            conf_dict, source = result
+            conf_dict = cast(
+                dict[str, Any],
+                get_subtable(conf_dict, NAMESPACE, allow_absence=False))
             _DEFAULTS = cls(conf_dict, source, list(NAMESPACE))
         if not copy:
-            return _DEFAULTS
-        return _DEFAULTS.copy()
+            return cast(Self, _DEFAULTS)
+        return cast(Self, _DEFAULTS.copy())
 
     @classmethod
     def from_config(cls, config: str | PathLike | bool | None = None, *,
@@ -219,9 +229,8 @@ class ConfigSource:
         else:  # Shield the lookup from the environment
             get_conf = functools.partial(find_and_read_config_file,
                                          config=config, env_var=None)
-        try:
-            content, source = get_conf()
-        except TypeError:  # Got `None`
+        result = get_conf()
+        if result is None:
             if config:
                 if os.path.exists(config):
                     Error = ValueError
@@ -230,6 +239,7 @@ class ConfigSource:
                 raise Error(
                     f'Cannot load configurations from {config!r}') from None
             return default_instance
+        content, source = result
         conf = {}
         try:
             for header in get_headers(default_instance.conf_dict):
