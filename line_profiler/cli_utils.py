@@ -45,7 +45,7 @@ class ParserLike(Protocol[A_co]):
 
 def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
                  hide_complementary_options: bool = True,
-                 **kwargs: object) -> A_co:
+                 **kwargs) -> A_co:
     """
     Override the ``'store_true'`` and ``'store_false'`` actions so that
     they are turned into options which:
@@ -97,10 +97,10 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
         return negated
 
     # Make sure there's at least one positional argument
-    args = [arg, *args]
+    _args = [arg, *args]
 
     if kwargs.get('action') not in ('store_true', 'store_false'):
-        return parser_like.add_argument(*args, **kwargs)
+        return parser_like.add_argument(*_args, **kwargs)
 
     # Long and short boolean flags should be handled separately: short
     # flags should remain 0-arg to permit flag concatenation, while long
@@ -108,7 +108,7 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
     prefix_chars = tuple(parser_like.prefix_chars)
     short_flags = []
     long_flags = []
-    for arg in args:
+    for arg in _args:
         assert arg.startswith(prefix_chars)
         if arg.startswith(tuple(char * 2 for char in prefix_chars)):
             long_flags.append(arg)
@@ -137,8 +137,9 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
         additional_msg = 'Short {}: {}'.format(
             'form' if len(short_flags) == 1 else 'forms',
             ', '.join(short_flags))
-        if long_kwargs.get('help'):
-            help_text = long_kwargs['help'].strip()
+        _help = long_kwargs.get('help')
+        if _help:
+            help_text = _help.strip()
             if help_text.endswith((')', ']')):
                 # Interpolate into existing parenthetical
                 help_text = '{}; {}{}{}'.format(
@@ -175,7 +176,7 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
     if hide_complementary_options:
         falsy_help_text = argparse.SUPPRESS
     else:
-        falsy_help_text = 'Negate these flags: ' + ', '.join(args)
+        falsy_help_text = 'Negate these flags: ' + ', '.join(_args)
     parser_like.add_argument(
         *(flag[:2] + 'no-' + flag[2:] for flag in long_flags),
         **{**long_kwargs,
@@ -186,8 +187,8 @@ def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
     return action
 
 
-def get_cli_config(subtable: str, /, *args: object,
-                   **kwargs: object) -> ConfigSource:
+def get_cli_config(subtable: str, /,
+                   *args, **kwargs) -> ConfigSource:
     """
     Get the ``tool.line_profiler.<subtable>`` configs and normalize
     its keys (``some-key`` -> ``some_key``).
@@ -197,8 +198,7 @@ def get_cli_config(subtable: str, /, *args: object,
             Name of the subtable the CLI app should refer to (e.g.
             ``'kernprof'``)
         *args, **kwargs
-            Passed to \
-:py:meth:`line_profiler.toml_config.ConfigSource.from_config`
+            Passed to :py:meth:`line_profiler.toml_config.ConfigSource.from_config`
 
     Returns:
         New :py:class:`~.line_profiler.toml_config.ConfigSource`
@@ -217,12 +217,15 @@ def get_python_executable() -> str:
             Command or path thereto corresponding to
             :py:data:`sys.executable`.
     """
-    if os.path.samefile(shutil.which('python'), sys.executable):
+    py_found = shutil.which('python')
+    if py_found is not None and os.path.samefile(py_found, sys.executable):
         return 'python'
-    elif os.path.samefile(shutil.which('python3'), sys.executable):
+
+    py3_found = shutil.which('python3')
+    if py3_found is not None and os.path.samefile(py3_found, sys.executable):
         return 'python3'
-    else:
-        return short_string_path(sys.executable)
+
+    return short_string_path(sys.executable)
 
 
 def positive_float(value: str) -> float:
@@ -318,11 +321,13 @@ def short_string_path(path: str | PathLike[str]) -> str:
             current directory.
     """
     path = pathlib.Path(path)
-    paths = {str(path)}
+    paths: set[str] = {str(path)}
     abspath = path.absolute()
     paths.add(str(abspath))
     try:
         paths.add(str(abspath.relative_to(path.cwd().absolute())))
     except ValueError:  # Not relative to the curdir
         pass
-    return min(paths, key=len)
+    shortest = min(paths, key=len)
+    assert isinstance(shortest, str)
+    return shortest

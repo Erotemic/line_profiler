@@ -7,7 +7,6 @@ Cython backend.
 from __future__ import annotations
 
 import functools
-import io
 import inspect
 import linecache
 import operator
@@ -21,7 +20,7 @@ from argparse import ArgumentParser
 from datetime import datetime
 from os import PathLike
 from typing import (TYPE_CHECKING, Callable, Literal, Mapping, Protocol,
-                    TypeVar, overload)
+                    TypeVar, overload, IO)
 from typing_extensions import ParamSpec, Self
 from functools import cached_property, partial, partialmethod
 
@@ -51,11 +50,22 @@ T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 PS = ParamSpec('PS')
 
+__all__ = [
+    'LineProfiler', 'LineStats',
+    'load_ipython_extension', 'load_stats', 'main',
+    'show_func', 'show_text'
+]
+
+
+class IPythonLike(Protocol):
+    def register_magics(self, magics: type) -> None:
+        ...
+
 
 @functools.lru_cache()
 def get_column_widths(
         config: bool | str | PathLike[str] | None = False
-) -> Mapping[Literal['line', 'hits', 'time', 'perhit', 'percent'], int]:
+) -> Mapping[Literal['line', 'hits', 'time', 'perhit', 'percent'], int] | Mapping[str, int]:
     """
     Arguments
         config (bool | str | pathlib.PurePath | None)
@@ -70,7 +80,7 @@ def get_column_widths(
     return types.MappingProxyType(subconf.conf_dict)
 
 
-def load_ipython_extension(ip: object) -> None:
+def load_ipython_extension(ip: IPythonLike) -> None:
     """ API for IPython to recognize this module as an IPython extension.
     """
     from .ipython_extension import LineProfilerMagics
@@ -164,7 +174,9 @@ fb60664135296ba6061cfaa2bb66d4ba77964c53
     namespace = inspect.getblock.__globals__
     namespace['BlockFinder'] = _CythonBlockFinder
     try:
-        return inspect.getblock(linecache.getlines(filename)[lineno - 1:])
+        lines = linecache.getlines(os.fspath(filename))
+        block = inspect.getblock(lines)[lineno - 1:]
+        return block
     finally:
         namespace['BlockFinder'] = BlockFinder
 
@@ -180,15 +192,13 @@ class _CythonBlockFinder(inspect.BlockFinder):
         is public but undocumented API.  See similar caveat in
         :py:func:`~.get_code_block`.
     """
-    def tokeneater(self, type: int, token: str,
-                   *args: object, **kwargs: object) -> object:
-        if (
-                not self.started
-                and type == tokenize.NAME
-                and token in ('cdef', 'cpdef', 'property')):
+    def tokeneater(self, type: int, token: str, srowcol: tuple[int, int], erowcol: tuple[int, int], line: str) -> None:
+        if ( not self.started
+             and type == tokenize.NAME
+             and token in ('cdef', 'cpdef', 'property')):
             # Fudge the token to get the desired 'scoping' behavior
             token = 'def'
-        return super().tokeneater(type, token, *args, **kwargs)
+        super().tokeneater(type, token, srowcol, erowcol, line)
 
 
 class _WrapperInfo:
@@ -296,8 +306,7 @@ class LineStats(CLineStats):
         self.timings, self.unit = self._get_aggregated_timings([self, other])
         return self
 
-    def print(self, stream: io.TextIOBase | None = None,
-              **kwargs: object) -> None:
+    def print(self, stream: IO | None = None, **kwargs) -> None:
         show_text(self.timings, self.unit, stream=stream, **kwargs)
 
     def to_file(self, filename: PathLike[str] | str) -> None:
@@ -540,7 +549,7 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         self.get_stats().to_file(filename)
 
     def print_stats(
-            self, stream: io.TextIOBase | None = None,
+            self, stream: IO | None = None,
             output_unit: float | None = None, stripzeros: bool = False,
             details: bool = True, summarize: bool = False,
             sort: bool = False, rich: bool = False, *,
@@ -552,14 +561,15 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
             stripzeros=stripzeros, details=details, summarize=summarize,
             sort=sort, rich=rich, config=config)
 
-    def _add_namespace(
-            self, namespace, *,
-            seen=None,
-            func_scoping_policy=ScopingPolicy.NONE,
-            class_scoping_policy=ScopingPolicy.NONE,
-            module_scoping_policy=ScopingPolicy.NONE,
-            wrap=False,
-            name=None):
+    def _add_namespace(self,
+                       namespace, *,
+                       seen=None,
+                       func_scoping_policy: ScopingPolicy = ScopingPolicy('none'),
+                       class_scoping_policy: ScopingPolicy = ScopingPolicy('none'),
+                       module_scoping_policy: ScopingPolicy = ScopingPolicy('none'),
+                       wrap=False,
+                       name=None
+                       ):
         def func_guard(func):
             return self._already_a_wrapper(func) or not func_check(func)
 
@@ -629,8 +639,7 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         Args:
             cls (type):
                 Class to be profiled.
-            scoping_policy (Union[str, ScopingPolicy, \
-ScopingPolicyDict, None]):
+            scoping_policy (Union[str, ScopingPolicy, ScopingPolicyDict, None]):
                 Whether (and how) to match the scope of members and
                 decide on whether to add them:
 
@@ -645,8 +654,7 @@ ScopingPolicyDict, None]):
 
                 :py:const:`None`
                     The default, equivalent to
-                    :py:data:\
-`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
+                    :py:data:`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
 
                 See :py:class:`~.ScopingPolicy` and
                 :py:meth:`.ScopingPolicy.to_policies` for details.
@@ -677,8 +685,7 @@ ScopingPolicyDict, None]):
         Args:
             mod (ModuleType):
                 Module to be profiled.
-            scoping_policy (Union[str, ScopingPolicy, \
-ScopingPolicyDict, None]):
+            scoping_policy (Union[str, ScopingPolicy, ScopingPolicyDict, None]):
                 Whether (and how) to match the scope of members and
                 decide on whether to add them:
 
@@ -693,8 +700,7 @@ ScopingPolicyDict, None]):
 
                 :py:const:`None`
                     The default, equivalent to
-                    :py:data:\
-`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
+                    :py:data:`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
 
                 See :py:class:`~.ScopingPolicy` and
                 :py:meth:`.ScopingPolicy.to_policies` for details.
@@ -753,8 +759,9 @@ def is_generated_code(filename: str) -> bool:
 def show_func(filename: str, start_lineno: int, func_name: str,
               timings: list[tuple[int, int, float]], unit: float,
               output_unit: float | None = None,
-              stream: io.TextIOBase | None = None,
-              stripzeros: bool = False, rich: bool = False,
+              stream: IO | None = None,
+              stripzeros: bool = False,
+              rich: bool = False,
               *,
               config: str | PathLike[str] | bool | None = None) -> None:
     """
@@ -778,7 +785,7 @@ def show_func(filename: str, start_lineno: int, func_name: str,
         output_unit (float | None):
             Output unit (in seconds) in which the timing info is displayed.
 
-        stream (io.TextIOBase | None):
+        stream (IO | None):
             Defaults to sys.stdout
 
         stripzeros (bool):
@@ -839,7 +846,7 @@ def show_func(filename: str, start_lineno: int, func_name: str,
             from rich.console import Console
             from rich.table import Table
         except ImportError:
-            rich = 0
+            rich = False
 
     if output_unit is None:
         output_unit = unit
@@ -847,6 +854,7 @@ def show_func(filename: str, start_lineno: int, func_name: str,
 
     linenos = [t[0] for t in timings]
 
+    assert stream is not None
     stream.write('Total time: %g s\n' % (total_time * unit))
     if os.path.exists(filename) or is_generated_code(filename):
         stream.write(f'File: {filename}\n')
@@ -976,11 +984,15 @@ def show_func(filename: str, start_lineno: int, func_name: str,
     stream.write('\n')
 
 
-def show_text(stats: _StatsLike, unit: float,
+def show_text(stats_timings: Mapping,
+              unit: float,
               output_unit: float | None = None,
-              stream: io.TextIOBase | None = None,
-              stripzeros: bool = False, details: bool = True,
-              summarize: bool = False, sort: bool = False, rich: bool = False,
+              stream: IO | None = None,
+              stripzeros: bool = False,
+              details: bool = True,
+              summarize: bool = False,
+              sort: bool = False,
+              rich: bool = False,
               *, config: str | PathLike[str] | bool | None = None) -> None:
     """
     Show text for the given timings.
@@ -998,6 +1010,7 @@ def show_text(stats: _StatsLike, unit: float,
     if stream is None:
         stream = sys.stdout
 
+    assert stream is not None
     if output_unit is not None:
         stream.write('Timer unit: %g s\n\n' % output_unit)
     else:
@@ -1005,10 +1018,10 @@ def show_text(stats: _StatsLike, unit: float,
 
     if sort:
         # Order by ascending duration
-        stats_order = sorted(stats.items(), key=lambda kv: sum(t[2] for t in kv[1]))
+        stats_order = sorted(stats_timings.items(), key=lambda kv: sum(t[2] for t in kv[1]))
     else:
         # Default ordering
-        stats_order = stats.items()
+        stats_order = stats_timings.items()
 
     # Pre-lookup the appropriate config file
     config = ConfigSource.from_config(config).path
@@ -1016,7 +1029,7 @@ def show_text(stats: _StatsLike, unit: float,
     if details:
         # Show detailed per-line information for each function.
         for (fn, lineno, name), timings in stats_order:
-            show_func(fn, lineno, name, stats[fn, lineno, name], unit,
+            show_func(fn, lineno, name, stats_timings[fn, lineno, name], unit,
                       output_unit=output_unit, stream=stream,
                       stripzeros=stripzeros, rich=rich, config=config)
 
@@ -1027,7 +1040,7 @@ def show_text(stats: _StatsLike, unit: float,
                 from rich.console import Console
                 from rich.markup import escape
             except ImportError:
-                rich = 0
+                rich = False
         line_template = '%6.2f seconds - %s:%s - %s'
         if rich:
             write_console = Console(file=stream, soft_wrap=True,
