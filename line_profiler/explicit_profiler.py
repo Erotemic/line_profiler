@@ -170,7 +170,7 @@ import os
 import pathlib
 import sys
 import typing
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 if typing.TYPE_CHECKING:
     ConfigArg = str | pathlib.PurePath | bool | None
