@@ -217,7 +217,7 @@ class _WrapperInfo:
 
 
 class _StatsLike(Protocol):
-    timings: Mapping[tuple[str, int, str], list[tuple[int, int, int]]]
+    timings: dict[tuple[str, int, str], list[tuple[int, int, int]]]
     unit: float
 
 

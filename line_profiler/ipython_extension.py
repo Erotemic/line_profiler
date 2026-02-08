@@ -532,7 +532,7 @@ class LineProfilerMagics(Magics):
                 # - `prof.add_function()` might have replaced the code
                 #   object, so retrieve it back from the dummy function
                 mock_func = types.SimpleNamespace(__code__=code)
-                prof.add_function(mock_func)  # type: ignore[arg-type]
+                prof.add_function(mock_func)
                 code = mock_func.__code__
                 # Notes:
                 # - We don't define `ip.user_global_ns` and `ip.user_ns`

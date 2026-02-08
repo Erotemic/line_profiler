@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
-from typing import Union
+from typing import Union, cast, overload
+
+
+_ImportNode = Union[ast.Import, ast.ImportFrom]
 
 
 def ast_create_profile_node(
@@ -90,20 +93,27 @@ class AstProfileTransformer(ast.NodeTransformer):
         """
         decor_ids = set()
         for decor in node.decorator_list:
-            try:
-                decor_ids.add(decor.id)
-            except AttributeError:
-                ...
+            decor_id = getattr(decor, 'id', None)
+            if decor_id is not None:
+                decor_ids.add(decor_id)
         if self._profiler_name not in decor_ids:
             node.decorator_list.append(ast.Name(id=self._profiler_name, ctx=ast.Load()))
-        return self.generic_visit(node)
+
+        return cast(Union[ast.FunctionDef, ast.AsyncFunctionDef], self.generic_visit(node))
 
     visit_FunctionDef = visit_AsyncFunctionDef = _visit_func_def
 
+    @overload
+    def _visit_import(self, node: ast.Import) -> ast.Import | list[ast.Import | ast.Expr]:
+        ...
+
+    @overload
+    def _visit_import(self, node: ast.ImportFrom) -> ast.ImportFrom | list[ast.ImportFrom | ast.Expr]:
+        ...
+
     def _visit_import(
             self, node: ast.Import | ast.ImportFrom
-    ) -> (ast.Import | ast.ImportFrom
-          | list[ast.Import | ast.ImportFrom | ast.Expr]):
+    ) -> _ImportNode | list[_ImportNode | ast.Expr]:
         """Add a node that profiles an import
 
         If profile_imports is True and the import is not in profiled_imports,
@@ -122,8 +132,11 @@ class AstProfileTransformer(ast.NodeTransformer):
                     returns list containing the import node and the profiling node
         """
         if not self._profile_imports:
-            return self.generic_visit(node)
-        visited = [self.generic_visit(node)]
+            return cast(_ImportNode, self.generic_visit(node))
+
+        visited_node = cast(_ImportNode, self.generic_visit(node))
+        visited: list[_ImportNode | ast.Expr] = [visited_node]
+
         for names in node.names:
             node_name = names.name if names.asname is None else names.asname
             if node_name in self._profiled_imports:

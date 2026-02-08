@@ -5,6 +5,7 @@ import os
 
 from .ast_tree_profiler import AstTreeProfiler
 from .util_static import modname_to_modpath, modpath_to_modname
+from typing import cast
 
 
 def get_module_from_importfrom(node: ast.ImportFrom, module: str) -> str:
@@ -46,6 +47,7 @@ def get_module_from_importfrom(node: ast.ImportFrom, module: str) -> str:
     """
     level = node.level
     if not level:
+        assert node.module is not None
         return node.module
     chunks = module.split('.')[:-level]
     if node.module:
@@ -61,10 +63,12 @@ class ImportFromTransformer(ast.NodeTransformer):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         level = node.level
         if not level:
-            return self.generic_visit(node)
-        module = get_module_from_importfrom(node, self.module)
-        new_node = ast.ImportFrom(module=module, names=node.names, level=0)
-        return self.generic_visit(ast.copy_location(new_node, node))
+            ret = self.generic_visit(node)
+        else:
+            module = get_module_from_importfrom(node, self.module)
+            new_node = ast.ImportFrom(module=module, names=node.names, level=0)
+            ret = self.generic_visit(ast.copy_location(new_node, node))
+        return cast(ast.ImportFrom, ret)
 
 
 class AstTreeModuleProfiler(AstTreeProfiler):

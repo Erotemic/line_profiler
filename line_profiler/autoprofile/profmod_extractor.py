@@ -7,6 +7,14 @@ import sys
 from .util_static import (modname_to_modpath, modpath_to_modname,
                           package_modpaths)
 
+from typing import TypedDict, Optional, List, Dict
+
+
+class ModuleDict(TypedDict):
+    name: str
+    alias: str | None
+    tree_index: int
+
 
 class ProfmodExtractor:
     """Map prof_mod to imports in an abstract syntax tree.
@@ -132,7 +140,7 @@ class ProfmodExtractor:
 
     @staticmethod
     def _ast_get_imports_from_tree(
-            tree: ast.Module) -> list[dict[str, str | int | None]]:
+            tree: ast.Module) -> list[ModuleDict]:
         """Get all imports in an abstract syntax tree.
 
         Args:
@@ -140,7 +148,7 @@ class ProfmodExtractor:
                 abstract syntax tree to fetch imports from.
 
         Returns:
-            module_dict_list (List[Dict[str,Union[str,int]]]):
+            module_dict_list (List[ModuleDict]):
                 list of dicts of all imports in the tree, containing:
                     name (str):
                         the real name of the import. e.g. foo from "import foo as bar"
@@ -166,6 +174,7 @@ class ProfmodExtractor:
                         modname_list.append(modname)
             elif isinstance(node, ast.ImportFrom):
                 for name in node.names:
+                    assert node.module is not None
                     modname = node.module + '.' + name.name
                     if modname not in modname_list:
                         alias = name.asname or name.name
@@ -181,7 +190,7 @@ class ProfmodExtractor:
     @staticmethod
     def _find_modnames_in_tree_imports(
             modnames_to_profile: list[str],
-            module_dict_list: list[dict[str, str | int | None]]
+            module_dict_list: list[ModuleDict]
     ) -> dict[int, str]:
         """Map modnames to imports from an abstract sytax tree.
 

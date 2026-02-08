@@ -76,9 +76,12 @@ def _extend_line_profiler_for_profiling_imports(prof: Any) -> None:
     prof.add_imported_function_or_module = types.MethodType(add_imported_function_or_module, prof)
 
 
-def run(script_file: str, ns: MutableMapping[str, Any],
-        prof_mod: list[str], profile_imports: bool = False,
-        as_module: bool = False) -> None:
+def run(script_file: str,
+        ns: dict[str, Any],
+        prof_mod: list[str],
+        profile_imports: bool = False,
+        as_module: bool = False
+       ) -> None:
     """Automatically profile a script and run it.
 
     Profile functions, classes & modules specified in prof_mod without needing to add
@@ -103,7 +106,7 @@ def run(script_file: str, ns: MutableMapping[str, Any],
             Whether we're running script_file as a module
     """
     class restore_dict:
-        def __init__(self, d: MutableMapping[str, Any], target=None):
+        def __init__(self, d: dict[str, Any], target=None):
             self.d = d
             self.target = target
             self.copy: dict[str, Any] | None = None
@@ -115,6 +118,7 @@ def run(script_file: str, ns: MutableMapping[str, Any],
 
         def __exit__(self, *_, **__):
             self.d.clear()
+            assert self.copy is not None
             self.d.update(self.copy)
             self.copy = None
 
