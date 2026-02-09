@@ -1165,6 +1165,9 @@ def _pre_profile(options, module, exit_on_error):
         if not options.dryrun:
             execfile(setup_file, ns, ns)
 
+    global_profiler = None
+    install_profiler = None
+
     if options.line_by_line:
         prof = line_profiler.LineProfiler()
         options.builtin = True
