@@ -2,6 +2,7 @@
 Miscellaneous utilities that :py:mod:`line_profiler` uses.
 """
 import enum
+import typing
 
 
 class _StrEnumBase(str, enum.Enum):
@@ -38,7 +39,13 @@ class _StrEnumBase(str, enum.Enum):
         return self.value
 
 
-class StringEnum(getattr(enum, 'StrEnum', _StrEnumBase)):
+if typing.TYPE_CHECKING:
+    _StringEnumBase = _StrEnumBase
+else:
+    _StringEnumBase = getattr(enum, 'StrEnum', _StrEnumBase)
+
+
+class StringEnum(_StringEnumBase):
     """
     Convenience wrapper around :py:class:`enum.StrEnum`.
 

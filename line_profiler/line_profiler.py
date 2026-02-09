@@ -332,8 +332,7 @@ class LineStats(CLineStats):
             # rounding errors
             stats_objs = sorted(stats_objs, key=operator.attrgetter('unit'))
             unit = stats_objs[-1].unit
-            # type: dict[tuple[str, int, int], dict[int, tuple[int, float]]
-            timing_dict = {}
+            timing_dict: dict[tuple[str, int, str], dict[int, tuple[int, float]]] = {}
             for stats in stats_objs:
                 factor = stats.unit / unit
                 for key, entries in stats.timings.items():
