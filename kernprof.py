@@ -1252,7 +1252,14 @@ def _main_profile(options, module=False, exit_on_error=True):
                 runner, target = 'execfile', script_file
             assert runner in ns
             if options.builtin:
-                _call_with_diagnostics(options, ns[runner], target, ns)
+                if options.line_by_line:
+                    _call_with_diagnostics(options, ns[runner], target, ns)
+                else:
+                    prof.enable_by_count()
+                    try:
+                        _call_with_diagnostics(options, ns[runner], target, ns)
+                    finally:
+                        prof.disable_by_count()
             else:
                 _call_with_diagnostics(
                     options, prof.runctx,
