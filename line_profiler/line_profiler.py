@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import annotations
 """
 This module defines the core :class:`LineProfiler` class as well as methods to
 inspect its output. This depends on the :py:mod:`line_profiler._line_profiler`
