@@ -1165,7 +1165,7 @@ def _pre_profile(options, module, exit_on_error):
         if not options.dryrun:
             execfile(setup_file, ns, ns)
 
-    global_profiler = line_profiler.profile
+    global_profiler = None
     install_profiler = lambda *_: None
 
     if options.line_by_line:
@@ -1179,13 +1179,11 @@ def _pre_profile(options, module, exit_on_error):
 
     if isinstance(prof, line_profiler.LineProfiler):
         # Overwrite the explicit decorator
+        global_profiler = line_profiler.profile
         install_profiler = global_profiler._kernprof_overwrite
         install_profiler(prof)
     if options.builtin:
-        builtins.__dict__['profile'] = (
-            prof if isinstance(prof, line_profiler.LineProfiler)
-            else global_profiler
-        )
+        builtins.__dict__['profile'] = prof
 
     if module:
         script_file = find_module_script(
@@ -1252,14 +1250,7 @@ def _main_profile(options, module=False, exit_on_error=True):
                 runner, target = 'execfile', script_file
             assert runner in ns
             if options.builtin:
-                if options.line_by_line:
-                    _call_with_diagnostics(options, ns[runner], target, ns)
-                else:
-                    prof.enable_by_count()
-                    try:
-                        _call_with_diagnostics(options, ns[runner], target, ns)
-                    finally:
-                        prof.disable_by_count()
+                _call_with_diagnostics(options, ns[runner], target, ns)
             else:
                 _call_with_diagnostics(
                     options, prof.runctx,
