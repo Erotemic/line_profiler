@@ -4,6 +4,8 @@ This module defines the core :class:`LineProfiler` class as well as methods to
 inspect its output. This depends on the :py:mod:`line_profiler._line_profiler`
 Cython backend.
 """
+from __future__ import annotations
+
 import functools
 import inspect
 import linecache
@@ -16,6 +18,11 @@ import types
 import tokenize
 from argparse import ArgumentParser
 from datetime import datetime
+from os import PathLike
+from typing import (TYPE_CHECKING, Callable, Literal, Mapping, Protocol,
+                    TypeVar, overload, IO)
+from typing_extensions import ParamSpec, Self
+from functools import cached_property, partial, partialmethod
 
 try:
     from ._line_profiler import (LineProfiler as CLineProfiler,
@@ -29,16 +36,36 @@ from . import _diagnostics as diagnostics
 from .cli_utils import (
     add_argument, get_cli_config, positive_float, short_string_path)
 from .profiler_mixin import ByCountProfilerMixin, is_c_level_callable
-from .scoping_policy import ScopingPolicy
+from .scoping_policy import ScopingPolicy, ScopingPolicyDict
 from .toml_config import ConfigSource
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .profiler_mixin import CLevelCallable, UnparametrizedCallableLike
 
 
 # NOTE: This needs to be in sync with ../kernprof.py and __init__.py
 __version__ = '5.0.2'
 
+T = TypeVar('T')
+T_co = TypeVar('T_co', covariant=True)
+PS = ParamSpec('PS')
+
+__all__ = [
+    'LineProfiler', 'LineStats',
+    'load_ipython_extension', 'load_stats', 'main',
+    'show_func', 'show_text'
+]
+
+
+class IPythonLike(Protocol):
+    def register_magics(self, magics: type) -> None:
+        ...
+
 
 @functools.lru_cache()
-def get_column_widths(config=False):
+def get_column_widths(
+        config: bool | str | PathLike[str] | None = False
+) -> Mapping[Literal['line', 'hits', 'time', 'perhit', 'percent'], int] | Mapping[str, int]:
     """
     Arguments
         config (bool | str | pathlib.PurePath | None)
@@ -53,14 +80,14 @@ def get_column_widths(config=False):
     return types.MappingProxyType(subconf.conf_dict)
 
 
-def load_ipython_extension(ip):
+def load_ipython_extension(ip: IPythonLike) -> None:
     """ API for IPython to recognize this module as an IPython extension.
     """
     from .ipython_extension import LineProfilerMagics
     ip.register_magics(LineProfilerMagics)
 
 
-def get_code_block(filename, lineno):
+def get_code_block(filename: os.PathLike[str] | str, lineno: int) -> list[str]:
     """
     Get the lines in the code block in a file starting from required
     line number; understands Cython code.
@@ -147,7 +174,9 @@ fb60664135296ba6061cfaa2bb66d4ba77964c53
     namespace = inspect.getblock.__globals__
     namespace['BlockFinder'] = _CythonBlockFinder
     try:
-        return inspect.getblock(linecache.getlines(filename)[lineno - 1:])
+        lines = linecache.getlines(os.fspath(filename))
+        block = inspect.getblock(lines)[lineno - 1:]
+        return block
     finally:
         namespace['BlockFinder'] = BlockFinder
 
@@ -163,14 +192,13 @@ class _CythonBlockFinder(inspect.BlockFinder):
         is public but undocumented API.  See similar caveat in
         :py:func:`~.get_code_block`.
     """
-    def tokeneater(self, type, token, *args, **kwargs):
-        if (
-                not self.started
-                and type == tokenize.NAME
-                and token in ('cdef', 'cpdef', 'property')):
+    def tokeneater(self, type: int, token: str, srowcol: tuple[int, int], erowcol: tuple[int, int], line: str) -> None:
+        if ( not self.started
+             and type == tokenize.NAME
+             and token in ('cdef', 'cpdef', 'property')):
             # Fudge the token to get the desired 'scoping' behavior
             token = 'def'
-        return super().tokeneater(type, token, *args, **kwargs)
+        super().tokeneater(type, token, srowcol, erowcol, line)
 
 
 class _WrapperInfo:
@@ -183,17 +211,22 @@ class _WrapperInfo:
         profiler_id (int)
             ID of the `LineProfiler`.
     """
-    def __init__(self, func, profiler_id):
+    def __init__(self, func: types.FunctionType, profiler_id: int) -> None:
         self.func = func
         self.profiler_id = profiler_id
 
 
+class _StatsLike(Protocol):
+    timings: dict[tuple[str, int, str], list[tuple[int, int, int]]]
+    unit: float
+
+
 class LineStats(CLineStats):
-    def __repr__(self):
+    def __repr__(self) -> str:
         return '{}({}, {:.2G})'.format(
             type(self).__name__, self.timings, self.unit)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         """
         Example:
             >>> from copy import deepcopy
@@ -222,7 +255,7 @@ class LineStats(CLineStats):
                 return NotImplemented
         return True
 
-    def __add__(self, other):
+    def __add__(self, other: _StatsLike) -> Self:
         """
         Example:
             >>> stats1 = LineStats(
@@ -246,7 +279,7 @@ class LineStats(CLineStats):
         timings, unit = self._get_aggregated_timings([self, other])
         return type(self)(timings, unit)
 
-    def __iadd__(self, other):
+    def __iadd__(self, other: _StatsLike) -> Self:
         """
         Example:
             >>> stats1 = LineStats(
@@ -273,17 +306,19 @@ class LineStats(CLineStats):
         self.timings, self.unit = self._get_aggregated_timings([self, other])
         return self
 
-    def print(self, stream=None, **kwargs):
+    def print(self, stream: IO | None = None, **kwargs) -> None:
         show_text(self.timings, self.unit, stream=stream, **kwargs)
 
-    def to_file(self, filename):
+    def to_file(self, filename: PathLike[str] | str) -> None:
         """ Pickle the instance to the given filename.
         """
         with open(filename, 'wb') as f:
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
 
     @classmethod
-    def from_files(cls, file, /, *files):
+    def from_files(
+            cls, file: PathLike[str] | str, /,
+            *files: PathLike[str] | str) -> Self:
         """
         Utility function to load an instance from the given filenames.
         """
@@ -294,7 +329,9 @@ class LineStats(CLineStats):
         return cls.from_stats_objects(*stats_objs)
 
     @classmethod
-    def from_stats_objects(cls, stats, /, *more_stats):
+    def from_stats_objects(
+            cls, stats: _StatsLike, /,
+            *more_stats: _StatsLike) -> Self:
         """
         Example:
             >>> stats1 = LineStats(
@@ -368,7 +405,45 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         >>> func()
         >>> profile.print_stats()
     """
-    def __call__(self, func):
+    @overload
+    def __call__(self, func: CLevelCallable) -> CLevelCallable:
+        ...
+
+    @overload
+    def __call__(self, func: UnparametrizedCallableLike) -> UnparametrizedCallableLike:
+        ...
+
+    @overload
+    def __call__(self, func: type[T]) -> type[T]:
+        ...
+
+    @overload
+    def __call__(self, func: partial[T]) -> partial[T]:
+        ...
+
+    @overload
+    def __call__(self, func: partialmethod[T]) -> partialmethod[T]:
+        ...
+
+    @overload
+    def __call__(self, func: cached_property[T_co]) -> cached_property[T_co]:
+        ...
+
+    @overload
+    def __call__(self, func: staticmethod[PS, T_co]) -> staticmethod[PS, T_co]:
+        ...
+
+    @overload
+    def __call__(
+        self, func: classmethod[type[T], PS, T_co],
+    ) -> classmethod[type[T], PS, T_co]:
+        ...
+
+    @overload
+    def __call__(self, func: Callable) -> types.FunctionType:
+        ...
+
+    def __call__(self, func: object):
         """
         Decorate a function, method, :py:class:`property`,
         :py:func:`~functools.partial` object etc. to start the profiler
@@ -384,12 +459,15 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         self.add_callable(func)
         return self.wrap_callable(func)
 
-    def wrap_callable(self, func):
+    def wrap_callable(self, func: object):
         if is_c_level_callable(func):  # Non-profilable
             return func
         return super().wrap_callable(func)
 
-    def add_callable(self, func, guard=None, name=None):
+    def add_callable(
+            self, func: object,
+            guard: Callable[[types.FunctionType], bool] | None = None,
+            name: str | None = None) -> Literal[0, 1]:
         """
         Register a function, method, :py:class:`property`,
         :py:func:`~functools.partial` object, etc. with the underlying
@@ -461,18 +539,21 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
             msg = f'{self_repr}: {msg}'
         logger.debug(msg)
 
-    def get_stats(self):
+    def get_stats(self) -> LineStats:
         return LineStats.from_stats_objects(super().get_stats())
 
-    def dump_stats(self, filename):
+    def dump_stats(self, filename: os.PathLike[str] | str) -> None:
         """ Dump a representation of the data to a file as a pickled
         :py:class:`~.LineStats` object from :py:meth:`~.get_stats()`.
         """
         self.get_stats().to_file(filename)
 
-    def print_stats(self, stream=None, output_unit=None, stripzeros=False,
-                    details=True, summarize=False, sort=False, rich=False, *,
-                    config=None):
+    def print_stats(
+            self, stream: IO | None = None,
+            output_unit: float | None = None, stripzeros: bool = False,
+            details: bool = True, summarize: bool = False,
+            sort: bool = False, rich: bool = False, *,
+            config: str | PathLike[str] | bool | None = None) -> None:
         """ Show the gathered statistics.
         """
         self.get_stats().print(
@@ -480,14 +561,15 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
             stripzeros=stripzeros, details=details, summarize=summarize,
             sort=sort, rich=rich, config=config)
 
-    def _add_namespace(
-            self, namespace, *,
-            seen=None,
-            func_scoping_policy=ScopingPolicy.NONE,
-            class_scoping_policy=ScopingPolicy.NONE,
-            module_scoping_policy=ScopingPolicy.NONE,
-            wrap=False,
-            name=None):
+    def _add_namespace(self,
+                       namespace, *,
+                       seen=None,
+                       func_scoping_policy: ScopingPolicy = ScopingPolicy('none'),
+                       class_scoping_policy: ScopingPolicy = ScopingPolicy('none'),
+                       module_scoping_policy: ScopingPolicy = ScopingPolicy('none'),
+                       wrap=False,
+                       name=None
+                       ):
         def func_guard(func):
             return self._already_a_wrapper(func) or not func_check(func)
 
@@ -546,7 +628,10 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
                     self._repr_for_log(namespace, name)))
         return count
 
-    def add_class(self, cls, *, scoping_policy=None, wrap=False):
+    def add_class(
+            self, cls: type, *,
+            scoping_policy: ScopingPolicy | str | ScopingPolicyDict | None = None,
+            wrap: bool = False) -> int:
         """
         Add the members (callables (wrappers), methods, classes, ...) in
         a class' local namespace and profile them.
@@ -554,8 +639,7 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         Args:
             cls (type):
                 Class to be profiled.
-            scoping_policy (Union[str, ScopingPolicy, \
-ScopingPolicyDict, None]):
+            scoping_policy (Union[str, ScopingPolicy, ScopingPolicyDict, None]):
                 Whether (and how) to match the scope of members and
                 decide on whether to add them:
 
@@ -570,8 +654,7 @@ ScopingPolicyDict, None]):
 
                 :py:const:`None`
                     The default, equivalent to
-                    :py:data:\
-`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
+                    :py:data:`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
 
                 See :py:class:`~.ScopingPolicy` and
                 :py:meth:`.ScopingPolicy.to_policies` for details.
@@ -591,7 +674,10 @@ ScopingPolicyDict, None]):
                                    module_scoping_policy=policies['module'],
                                    wrap=wrap)
 
-    def add_module(self, mod, *, scoping_policy=None, wrap=False):
+    def add_module(
+            self, mod: types.ModuleType, *,
+            scoping_policy: ScopingPolicy | str | ScopingPolicyDict | None = None,
+            wrap: bool = False) -> int:
         """
         Add the members (callables (wrappers), methods, classes, ...) in
         a module's local namespace and profile them.
@@ -599,8 +685,7 @@ ScopingPolicyDict, None]):
         Args:
             mod (ModuleType):
                 Module to be profiled.
-            scoping_policy (Union[str, ScopingPolicy, \
-ScopingPolicyDict, None]):
+            scoping_policy (Union[str, ScopingPolicy, ScopingPolicyDict, None]):
                 Whether (and how) to match the scope of members and
                 decide on whether to add them:
 
@@ -615,8 +700,7 @@ ScopingPolicyDict, None]):
 
                 :py:const:`None`
                     The default, equivalent to
-                    :py:data:\
-`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
+                    :py:data:`~.scoping_policy.DEFAULT_SCOPING_POLICIES`.
 
                 See :py:class:`~.ScopingPolicy` and
                 :py:meth:`.ScopingPolicy.to_policies` for details.
@@ -658,7 +742,7 @@ ScopingPolicyDict, None]):
 
 # This could be in the ipython_extension submodule,
 # but it doesn't depend on the IPython module so it's easier to just let it stay here.
-def is_generated_code(filename):
+def is_generated_code(filename: str) -> bool:
     """ Return True if a filename corresponds to generated code, such as a
     Jupyter Notebook cell.
     """
@@ -672,10 +756,14 @@ def is_generated_code(filename):
     )
 
 
-def show_func(filename, start_lineno, func_name, timings, unit,
-              output_unit=None, stream=None, stripzeros=False, rich=False,
+def show_func(filename: str, start_lineno: int, func_name: str,
+              timings: list[tuple[int, int, float]], unit: float,
+              output_unit: float | None = None,
+              stream: IO | None = None,
+              stripzeros: bool = False,
+              rich: bool = False,
               *,
-              config=None):
+              config: str | PathLike[str] | bool | None = None) -> None:
     """
     Show results for a single function.
 
@@ -697,7 +785,7 @@ def show_func(filename, start_lineno, func_name, timings, unit,
         output_unit (float | None):
             Output unit (in seconds) in which the timing info is displayed.
 
-        stream (io.TextIOBase | None):
+        stream (IO | None):
             Defaults to sys.stdout
 
         stripzeros (bool):
@@ -758,7 +846,7 @@ def show_func(filename, start_lineno, func_name, timings, unit,
             from rich.console import Console
             from rich.table import Table
         except ImportError:
-            rich = 0
+            rich = False
 
     if output_unit is None:
         output_unit = unit
@@ -766,6 +854,7 @@ def show_func(filename, start_lineno, func_name, timings, unit,
 
     linenos = [t[0] for t in timings]
 
+    assert stream is not None
     stream.write('Total time: %g s\n' % (total_time * unit))
     if os.path.exists(filename) or is_generated_code(filename):
         stream.write(f'File: {filename}\n')
@@ -895,9 +984,16 @@ def show_func(filename, start_lineno, func_name, timings, unit,
     stream.write('\n')
 
 
-def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
-              details=True, summarize=False, sort=False, rich=False, *,
-              config=None):
+def show_text(stats_timings: Mapping,
+              unit: float,
+              output_unit: float | None = None,
+              stream: IO | None = None,
+              stripzeros: bool = False,
+              details: bool = True,
+              summarize: bool = False,
+              sort: bool = False,
+              rich: bool = False,
+              *, config: str | PathLike[str] | bool | None = None) -> None:
     """
     Show text for the given timings.
 
@@ -914,6 +1010,7 @@ def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
     if stream is None:
         stream = sys.stdout
 
+    assert stream is not None
     if output_unit is not None:
         stream.write('Timer unit: %g s\n\n' % output_unit)
     else:
@@ -921,10 +1018,10 @@ def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
 
     if sort:
         # Order by ascending duration
-        stats_order = sorted(stats.items(), key=lambda kv: sum(t[2] for t in kv[1]))
+        stats_order = sorted(stats_timings.items(), key=lambda kv: sum(t[2] for t in kv[1]))
     else:
         # Default ordering
-        stats_order = stats.items()
+        stats_order = stats_timings.items()
 
     # Pre-lookup the appropriate config file
     config = ConfigSource.from_config(config).path
@@ -932,7 +1029,7 @@ def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
     if details:
         # Show detailed per-line information for each function.
         for (fn, lineno, name), timings in stats_order:
-            show_func(fn, lineno, name, stats[fn, lineno, name], unit,
+            show_func(fn, lineno, name, stats_timings[fn, lineno, name], unit,
                       output_unit=output_unit, stream=stream,
                       stripzeros=stripzeros, rich=rich, config=config)
 
@@ -943,7 +1040,7 @@ def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
                 from rich.console import Console
                 from rich.markup import escape
             except ImportError:
-                rich = 0
+                rich = False
         line_template = '%6.2f seconds - %s:%s - %s'
         if rich:
             write_console = Console(file=stream, soft_wrap=True,
@@ -967,7 +1064,7 @@ def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
 load_stats = LineStats.from_files
 
 
-def main():
+def main() -> None:
     """
     The line profiler CLI to view output from :command:`kernprof -l`.
     """

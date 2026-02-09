@@ -2,12 +2,16 @@
 Shared utilities between the :command:`python -m line_profiler` and
 :command:`kernprof` CLI tools.
 """
+from __future__ import annotations
+
 import argparse
 import functools
 import os
 import pathlib
 import shutil
 import sys
+from os import PathLike
+from typing import Protocol, Sequence, TypeVar
 from .toml_config import ConfigSource
 
 
@@ -16,9 +20,32 @@ _BOOLEAN_VALUES = {**{k.casefold(): False
                    **{k.casefold(): True
                       for k in ('1', 'on', 'True', 'T', 'yes', 'Y')}}
 
+P_con = TypeVar('P_con', bound='ParserLike', contravariant=True)
+A_co = TypeVar('A_co', bound='ActionLike', covariant=True)
 
-def add_argument(parser_like, arg, /, *args,
-                 hide_complementary_options=True, **kwargs):
+
+class ActionLike(Protocol[P_con]):
+    def __call__(self, parser: P_con, namespace: argparse.Namespace,
+                 values: str | Sequence[object] | None,
+                 option_string: str | None = None) -> None:
+        ...
+
+    def format_usage(self) -> str:
+        ...
+
+
+class ParserLike(Protocol[A_co]):
+    def add_argument(self, arg: str, /, *args: str, **kwargs: object) -> A_co:
+        ...
+
+    @property
+    def prefix_chars(self) -> str:
+        ...
+
+
+def add_argument(parser_like: ParserLike[A_co], arg: str, /, *args: str,
+                 hide_complementary_options: bool = True,
+                 **kwargs) -> A_co:
     """
     Override the ``'store_true'`` and ``'store_false'`` actions so that
     they are turned into options which:
@@ -70,10 +97,10 @@ def add_argument(parser_like, arg, /, *args,
         return negated
 
     # Make sure there's at least one positional argument
-    args = [arg, *args]
+    _args = [arg, *args]
 
     if kwargs.get('action') not in ('store_true', 'store_false'):
-        return parser_like.add_argument(*args, **kwargs)
+        return parser_like.add_argument(*_args, **kwargs)
 
     # Long and short boolean flags should be handled separately: short
     # flags should remain 0-arg to permit flag concatenation, while long
@@ -81,7 +108,7 @@ def add_argument(parser_like, arg, /, *args,
     prefix_chars = tuple(parser_like.prefix_chars)
     short_flags = []
     long_flags = []
-    for arg in args:
+    for arg in _args:
         assert arg.startswith(prefix_chars)
         if arg.startswith(tuple(char * 2 for char in prefix_chars)):
             long_flags.append(arg)
@@ -110,8 +137,9 @@ def add_argument(parser_like, arg, /, *args,
         additional_msg = 'Short {}: {}'.format(
             'form' if len(short_flags) == 1 else 'forms',
             ', '.join(short_flags))
-        if long_kwargs.get('help'):
-            help_text = long_kwargs['help'].strip()
+        _help = long_kwargs.get('help')
+        if _help:
+            help_text = _help.strip()
             if help_text.endswith((')', ']')):
                 # Interpolate into existing parenthetical
                 help_text = '{}; {}{}{}'.format(
@@ -126,7 +154,8 @@ def add_argument(parser_like, arg, /, *args,
             long_kwargs['help'] = f'({additional_msg})'
         short_kwargs['help'] = argparse.SUPPRESS
 
-    long_action = short_action = None
+    long_action: A_co | None = None
+    short_action: A_co | None = None
     if long_flags:
         long_action = parser_like.add_argument(*long_flags, **long_kwargs)
         short_kwargs['dest'] = long_action.dest
@@ -147,7 +176,7 @@ def add_argument(parser_like, arg, /, *args,
     if hide_complementary_options:
         falsy_help_text = argparse.SUPPRESS
     else:
-        falsy_help_text = 'Negate these flags: ' + ', '.join(args)
+        falsy_help_text = 'Negate these flags: ' + ', '.join(_args)
     parser_like.add_argument(
         *(flag[:2] + 'no-' + flag[2:] for flag in long_flags),
         **{**long_kwargs,
@@ -158,7 +187,8 @@ def add_argument(parser_like, arg, /, *args,
     return action
 
 
-def get_cli_config(subtable, /, *args, **kwargs):
+def get_cli_config(subtable: str, /,
+                   *args, **kwargs) -> ConfigSource:
     """
     Get the ``tool.line_profiler.<subtable>`` configs and normalize
     its keys (``some-key`` -> ``some_key``).
@@ -168,8 +198,7 @@ def get_cli_config(subtable, /, *args, **kwargs):
             Name of the subtable the CLI app should refer to (e.g.
             ``'kernprof'``)
         *args, **kwargs
-            Passed to \
-:py:meth:`line_profiler.toml_config.ConfigSource.from_config`
+            Passed to :py:meth:`line_profiler.toml_config.ConfigSource.from_config`
 
     Returns:
         New :py:class:`~.line_profiler.toml_config.ConfigSource`
@@ -181,22 +210,25 @@ def get_cli_config(subtable, /, *args, **kwargs):
     return config
 
 
-def get_python_executable():
+def get_python_executable() -> str:
     """
     Returns:
         str: command
             Command or path thereto corresponding to
             :py:data:`sys.executable`.
     """
-    if os.path.samefile(shutil.which('python'), sys.executable):
+    py_found = shutil.which('python')
+    if py_found is not None and os.path.samefile(py_found, sys.executable):
         return 'python'
-    elif os.path.samefile(shutil.which('python3'), sys.executable):
+
+    py3_found = shutil.which('python3')
+    if py3_found is not None and os.path.samefile(py3_found, sys.executable):
         return 'python3'
-    else:
-        return short_string_path(sys.executable)
+
+    return short_string_path(sys.executable)
 
 
-def positive_float(value):
+def positive_float(value: str) -> float:
     """
     Arguments:
         value (str)
@@ -214,7 +246,8 @@ def positive_float(value):
     return val
 
 
-def boolean(value, *, fallback=None, invert=False):
+def boolean(value: str, *, fallback: bool | None = None,
+            invert: bool = False) -> bool:
     """
     Arguments:
         value (str)
@@ -275,7 +308,7 @@ def boolean(value, *, fallback=None, invert=False):
     return fallback
 
 
-def short_string_path(path):
+def short_string_path(path: str | PathLike[str]) -> str:
     """
     Arguments:
         path (str | os.PathLike[str]):
@@ -288,11 +321,13 @@ def short_string_path(path):
             current directory.
     """
     path = pathlib.Path(path)
-    paths = {str(path)}
+    paths: set[str] = {str(path)}
     abspath = path.absolute()
     paths.add(str(abspath))
     try:
         paths.add(str(abspath.relative_to(path.cwd().absolute())))
     except ValueError:  # Not relative to the curdir
         pass
-    return min(paths, key=len)
+    shortest = min(paths, key=len)
+    assert isinstance(shortest, str)
+    return shortest

@@ -2,9 +2,10 @@
 Read and resolve user-supplied TOML files and combine them with the
 default to generate configurations.
 """
+from __future__ import annotations
+
 import copy
 import dataclasses
-import functools
 import importlib.resources
 import itertools
 import os
@@ -14,16 +15,22 @@ try:
 except ImportError:  # Python < 3.11
     import tomli as tomllib  # type: ignore[no-redef] # noqa: F811
 from collections.abc import Mapping
-from typing import Dict, List, Any
+from os import PathLike
+from typing import Any, Mapping as TypingMapping, Sequence, TypeVar
+from typing_extensions import Self
 
+
+K = TypeVar('K')
+V = TypeVar('V')
+NestedTable = TypingMapping[K, 'NestedTable[K, V]' | V]
 
 __all__ = ['ConfigSource']
 
 NAMESPACE = 'tool', 'line_profiler'
-TARGETS = 'line_profiler.toml', 'pyproject.toml'
+TARGETS = ['line_profiler.toml', 'pyproject.toml']
 ENV_VAR = 'LINE_PROFILER_RC'
 
-_DEFAULTS = None
+_DEFAULTS: ConfigSource | None = None
 
 
 @dataclasses.dataclass
@@ -33,7 +40,7 @@ class ConfigSource:
     read from.
 
     Attributes:
-        conf_dict (dict[str, Any])
+        conf_dict (Mapping[str, Any])
             The combination of the ``tool.line_profiler`` tables of the
             provided/looked-up config file (if any) and the default as a
             dictionary.
@@ -45,11 +52,11 @@ class ConfigSource:
             :py:attr:`~.ConfigSource.path`
             :py:attr:`~.ConfigSource.conf_dict` can be found.
     """
-    conf_dict: Dict[str, Any]
+    conf_dict: Mapping[str, Any]
     path: pathlib.Path
-    subtable: List[str]
+    subtable: list[str]
 
-    def copy(self):
+    def copy(self) -> Self:
         """
         Returns:
             Copy of the object.
@@ -57,7 +64,8 @@ class ConfigSource:
         return type(self)(
             copy.deepcopy(self.conf_dict), self.path, self.subtable.copy())
 
-    def get_subconfig(self, *headers, allow_absence=False, copy=False):
+    def get_subconfig(self, *headers: str, allow_absence: bool = False,
+                      copy: bool = False) -> Self:
         """
         Arguments:
             headers (str):
@@ -93,7 +101,7 @@ class ConfigSource:
         return type(self)(new_dict, self.path, new_subtable)
 
     @classmethod
-    def from_default(cls, *, copy=True):
+    def from_default(cls, *, copy: bool = True) -> ConfigSource:
         """
         Get the default TOML configuration that ships with the package.
 
@@ -120,17 +128,22 @@ class ConfigSource:
 
         global _DEFAULTS
         if _DEFAULTS is None:
+            assert __spec__ is not None
             package = __spec__.name.rpartition('.')[0]
             with find_file(package + '.rc', 'line_profiler.toml') as path:
-                conf_dict, source = find_and_read_config_file(config=path)
+                _result = find_and_read_config_file(config=path)
+            assert _result is not None
+            conf_dict, source = _result
             conf_dict = get_subtable(conf_dict, NAMESPACE, allow_absence=False)
             _DEFAULTS = cls(conf_dict, source, list(NAMESPACE))
+        assert _DEFAULTS is not None
         if not copy:
-            return _DEFAULTS
+            return  _DEFAULTS
         return _DEFAULTS.copy()
 
     @classmethod
-    def from_config(cls, config=None, *, read_env=True):
+    def from_config(cls, config: str | PathLike | bool | None = None, *,
+                    read_env: bool = True) -> ConfigSource:
         """
         Create an instance by loading from a config file.
 
@@ -187,8 +200,8 @@ class ConfigSource:
                 configuration (see
                 :py:meth:`~.ConfigSource.from_default`).
         """
-        def merge(template, supplied):
-            if not (isinstance(template, dict) and isinstance(supplied, dict)):
+        def merge(template: Mapping[str, Any], supplied: Mapping[str, Any]):
+            if not (isinstance(template, Mapping) and isinstance(supplied, Mapping)):
                 return supplied
             result = {}
             for key, default in template.items():
@@ -207,15 +220,13 @@ class ConfigSource:
         if config is not None:
             # Promote to `Path` (and catch type errors) early
             config = pathlib.Path(config)
+
         if read_env:
-            get_conf = functools.partial(find_and_read_config_file,
-                                         config=config)
-        else:  # Shield the lookup from the environment
-            get_conf = functools.partial(find_and_read_config_file,
-                                         config=config, env_var=None)
-        try:
-            content, source = get_conf()
-        except TypeError:  # Got `None`
+            _result = find_and_read_config_file(config=config)
+        else:
+            # Shield the lookup from the environment
+            _result = find_and_read_config_file(config=config, env_var=None)
+        if _result is None:
             if config:
                 if os.path.exists(config):
                     Error = ValueError
@@ -224,6 +235,9 @@ class ConfigSource:
                 raise Error(
                     f'Cannot load configurations from {config!r}') from None
             return default_instance
+        else:
+            content, source = _result
+
         conf = {}
         try:
             for header in get_headers(default_instance.conf_dict):
@@ -258,7 +272,11 @@ class ConfigSource:
 
 
 def find_and_read_config_file(
-        *, config=None, env_var=ENV_VAR, targets=TARGETS):
+        *,
+        config: str | PathLike | None = None,
+        env_var: str | None = ENV_VAR,
+        targets: Sequence[str | PathLike] = TARGETS
+     ) -> tuple[Mapping[str, Mapping[str, Any]], pathlib.Path] | None:
     """
     Arguments:
         config (str | os.PathLike[str] | None):
@@ -275,7 +293,7 @@ def find_and_read_config_file(
 
     Returns:
         If the provided/looked-up file is readable and is valid TOML:
-            tuple[dict, Path]: content, path
+            tuple[Mapping, Path]: content, path
                 * ``content``: parsed content of the file as a
                   dictionary
                 * ``path``: absolute path to the file
@@ -308,7 +326,8 @@ def find_and_read_config_file(
     return None
 
 
-def get_subtable(table, keys, *, allow_absence=True):
+def get_subtable(table: Mapping[K, Any], keys: Sequence[K], *,
+                 allow_absence: bool = True) -> Mapping[K, Any]:
     """
     Arguments:
         table (Mapping):
@@ -354,7 +373,8 @@ def get_subtable(table, keys, *, allow_absence=True):
     return subtable
 
 
-def get_headers(table, *, include_implied=False):
+def get_headers(table: NestedTable[K, Any], *,
+                include_implied: bool = False) -> set[tuple[K, ...]]:
     """
     Arguments:
         table (Mapping):

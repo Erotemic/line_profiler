@@ -339,8 +339,7 @@ class LineStats(object):
 
     Attributes:
 
-        timings (dict[tuple[str, int, str], \
-list[tuple[int, int, int]]]):
+        timings (dict[tuple[str, int, str], list[tuple[int, int, int]]]):
             Mapping from ``(filename, first_lineno, function_name)`` of
             the profiled function to a list of
             ``(lineno, nhits, total_time)`` tuples for each profiled
@@ -553,16 +552,11 @@ cdef class _LineProfilerManager:
     .. |PY_YIELD| replace:: :py:attr:`!sys.monitoring.events.PY_YIELD`
     .. |RAISE| replace:: :py:attr:`!sys.monitoring.events.RAISE`
     .. |RERAISE| replace:: :py:attr:`!sys.monitoring.events.RERAISE`
-    .. _LINE: https://docs.python.org/3/library/\
-sys.monitoring.html#monitoring-event-LINE
-    .. _PY_RETURN: https://docs.python.org/3/library/\
-sys.monitoring.html#monitoring-event-PY_RETURN
-    .. _PY_YIELD: https://docs.python.org/3/library/\
-sys.monitoring.html#monitoring-event-PY_YIELD
-    .. _RAISE: https://docs.python.org/3/library/\
-sys.monitoring.html#monitoring-event-RAISE
-    .. _RERAISE: https://docs.python.org/3/library/\
-sys.monitoring.html#monitoring-event-RERAISE
+    .. _LINE: https://docs.python.org/3/library/sys.monitoring.html#monitoring-event-LINE
+    .. _PY_RETURN: https://docs.python.org/3/library/sys.monitoring.html#monitoring-event-PY_RETURN
+    .. _PY_YIELD: https://docs.python.org/3/library/sys.monitoring.html#monitoring-event-PY_YIELD
+    .. _RAISE: https://docs.python.org/3/library/sys.monitoring.html#monitoring-event-RAISE
+    .. _RERAISE: https://docs.python.org/3/library/sys.monitoring.html#monitoring-event-RERAISE
     """
     cdef TraceCallback *legacy_callback
     cdef _SysMonitoringState mon_state
@@ -1041,10 +1035,8 @@ cdef class LineProfiler:
             for ``'call'`` events (see the `C implementation`_ of
             :py:mod:`sys`).
 
-    .. _C implementation: https://github.com/python/cpython/blob/\
-6cb20a219a860eaf687b2d968b41c480c7461909/Python/sysmodule.c#L1124
-    .. _"legacy" trace system: https://github.com/python/cpython/blob/\
-3.13/Python/legacy_tracing.c
+    .. _C implementation: https://github.com/python/cpython/blob/6cb20a219a860eaf687b2d968b41c480c7461909/Python/sysmodule.c#L1124
+    .. _"legacy" trace system: https://github.com/python/cpython/blob/3.13/Python/legacy_tracing.c
     """
     cdef unordered_map[int64, LineTimeMap] _c_code_map
     # Mapping between thread-id and map of LastTime
@@ -1100,8 +1092,7 @@ cdef class LineProfiler:
             :py:class:`property`).
 
         .. |function| replace:: :py:class:`types.FunctionType`
-        .. _function: https://docs.python.org/3/reference/\
-datamodel.html#user-defined-functions
+        .. _function: https://docs.python.org/3/reference/datamodel.html#user-defined-functions
         """
         if hasattr(func, "__wrapped__"):
             warn(

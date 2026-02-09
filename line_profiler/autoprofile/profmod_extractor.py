@@ -1,9 +1,19 @@
+from __future__ import annotations
+
 import ast
 import os
 import sys
 
 from .util_static import (modname_to_modpath, modpath_to_modname,
                           package_modpaths)
+
+from typing import TypedDict, Optional, List, Dict
+
+
+class ModuleDict(TypedDict):
+    name: str
+    alias: str | None
+    tree_index: int
 
 
 class ProfmodExtractor:
@@ -13,7 +23,8 @@ class ProfmodExtractor:
     abstract syntax tree.
     """
 
-    def __init__(self, tree, script_file, prof_mod):
+    def __init__(self, tree: ast.Module, script_file: str,
+                 prof_mod: list[str]) -> None:
         """Initializes the AST tree profiler instance with the AST, script file path and prof_mod
 
         Args:
@@ -33,7 +44,7 @@ class ProfmodExtractor:
         self._prof_mod = prof_mod
 
     @staticmethod
-    def _is_path(text):
+    def _is_path(text: str) -> bool:
         """Check whether a string is a path.
 
         Checks if a string contains a slash or ends with .py indicating it is a path.
@@ -50,7 +61,8 @@ class ProfmodExtractor:
         return ret
 
     @classmethod
-    def _get_modnames_to_profile_from_prof_mod(cls, script_file, prof_mod):
+    def _get_modnames_to_profile_from_prof_mod(
+            cls, script_file: str, prof_mod: list[str]) -> list[str]:
         """Grab the valid paths and all dotted paths in prof_mod and their subpackages
         and submodules, in the form of dotted paths.
 
@@ -127,7 +139,8 @@ class ProfmodExtractor:
         return modnames_to_profile
 
     @staticmethod
-    def _ast_get_imports_from_tree(tree):
+    def _ast_get_imports_from_tree(
+            tree: ast.Module) -> list[ModuleDict]:
         """Get all imports in an abstract syntax tree.
 
         Args:
@@ -135,7 +148,7 @@ class ProfmodExtractor:
                 abstract syntax tree to fetch imports from.
 
         Returns:
-            module_dict_list (List[Dict[str,Union[str,int]]]):
+            module_dict_list (List[ModuleDict]):
                 list of dicts of all imports in the tree, containing:
                     name (str):
                         the real name of the import. e.g. foo from "import foo as bar"
@@ -161,6 +174,7 @@ class ProfmodExtractor:
                         modname_list.append(modname)
             elif isinstance(node, ast.ImportFrom):
                 for name in node.names:
+                    assert node.module is not None
                     modname = node.module + '.' + name.name
                     if modname not in modname_list:
                         alias = name.asname or name.name
@@ -174,7 +188,10 @@ class ProfmodExtractor:
         return module_dict_list
 
     @staticmethod
-    def _find_modnames_in_tree_imports(modnames_to_profile, module_dict_list):
+    def _find_modnames_in_tree_imports(
+            modnames_to_profile: list[str],
+            module_dict_list: list[ModuleDict]
+    ) -> dict[int, str]:
         """Map modnames to imports from an abstract sytax tree.
 
         Find imports in modue_dict_list, created from an abstract syntax tree, that match
@@ -214,7 +231,7 @@ class ProfmodExtractor:
             modnames_found_in_tree[module_dict['tree_index']] = name
         return modnames_found_in_tree
 
-    def run(self):
+    def run(self) -> dict[int, str]:
         """Map prof_mod to imports in an abstract syntax tree.
 
         Takes the paths and dotted paths in prod_mod and finds their respective imports in an
