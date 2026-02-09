@@ -170,7 +170,7 @@ import os
 import pathlib
 import sys
 import typing
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from .line_profiler import LineProfiler
 
@@ -187,6 +187,17 @@ from .toml_config import ConfigSource
 # which helps prevent helper processes from claiming ownership and clobbering
 # output. Standalone subprocess runs should always be able to reset this value.
 _OWNER_PID_ENVVAR: str = 'LINE_PROFILER_OWNER_PID'
+
+
+class _ProfileLike(Protocol):
+    def __call__(self, func: Callable) -> Callable:
+        ...
+
+    def print_stats(self, *args: Any, **kwargs: Any) -> None:
+        ...
+
+    def dump_stats(self, *args: Any, **kwargs: Any) -> None:
+        ...
 
 
 class GlobalProfiler:
@@ -275,7 +286,7 @@ class GlobalProfiler:
     """
 
     _config: pathlib.PurePath | None
-    _profile: LineProfiler | None
+    _profile: _ProfileLike | None
     _owner_pid: int | None
     enabled: bool | None
 
@@ -289,7 +300,7 @@ class GlobalProfiler:
         config_source = ConfigSource.from_config(config)
         self._config = config_source.path
 
-        self._profile: LineProfiler | None = None
+        self._profile: _ProfileLike | None = None
         self._owner_pid = None
         self.enabled = None
         # Configs:
@@ -306,7 +317,7 @@ class GlobalProfiler:
         # supplied `config`)
         self.show_config.pop('column_widths')
 
-    def _kernprof_overwrite(self, profile: LineProfiler) -> None:
+    def _kernprof_overwrite(self, profile: _ProfileLike) -> None:
         """
         Kernprof will call this when it runs, so we can use its profile object
         instead of our own. Note: when kernprof overwrites us we wont register
@@ -443,7 +454,6 @@ class GlobalProfiler:
         if not self.enabled:
             return func
         assert self._profile is not None
-
         wrapped = self._profile(func)
         return wrapped
 

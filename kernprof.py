@@ -251,6 +251,7 @@ class ContextualProfile(ByCountProfilerMixin, Profile):
     def __init__(self, *args, **kwds):
         super().__init__(*args, **kwds)
         self.enable_count = 0
+        self.disable()
 
     def __call__(self, func):
         return self.wrap_callable(func)
@@ -1165,8 +1166,8 @@ def _pre_profile(options, module, exit_on_error):
         if not options.dryrun:
             execfile(setup_file, ns, ns)
 
-    global_profiler = None
-    install_profiler = lambda *_: None
+    global_profiler = line_profiler.profile
+    install_profiler = global_profiler._kernprof_overwrite
 
     if options.line_by_line:
         prof = line_profiler.LineProfiler()
@@ -1177,11 +1178,8 @@ def _pre_profile(options, module, exit_on_error):
     else:
         prof = ContextualProfile()
 
-    if isinstance(prof, line_profiler.LineProfiler):
-        # Overwrite the explicit decorator
-        global_profiler = line_profiler.profile
-        install_profiler = global_profiler._kernprof_overwrite
-        install_profiler(prof)
+    # Overwrite the explicit decorator
+    install_profiler(prof)
     if options.builtin:
         builtins.__dict__['profile'] = prof
 
