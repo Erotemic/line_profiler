@@ -200,12 +200,14 @@ import time
 import warnings
 from argparse import ArgumentParser
 from io import StringIO
+import importlib.util
 from operator import methodcaller
 from runpy import run_module
 from pathlib import Path
 from pprint import pformat
 from shlex import quote
 from textwrap import indent, dedent
+from typing import TYPE_CHECKING, Any
 from types import MethodType, SimpleNamespace
 
 # NOTE: This version needs to be manually maintained in
@@ -214,10 +216,13 @@ __version__ = '5.0.2'
 
 # Guard the import of cProfile such that 3.x people
 # without lsprof can still use this script.
-try:
-    from cProfile import Profile
-except ImportError:
-    from profile import Profile  # type: ignore[assignment,no-redef]
+if TYPE_CHECKING:
+    from cProfile import Profile as Profile
+else:
+    try:
+        from cProfile import Profile as Profile
+    except ImportError:
+        from profile import Profile as Profile
 
 import line_profiler
 from line_profiler.cli_utils import (
@@ -244,7 +249,7 @@ class ContextualProfile(ByCountProfilerMixin, Profile):
     for Python 2.5 with: statements and a decorator.
     """
     def __init__(self, *args, **kwds):
-        super(ByCountProfilerMixin, self).__init__(*args, **kwds)
+        super().__init__(*args, **kwds)
         self.enable_count = 0
 
     def __call__(self, func):
@@ -281,7 +286,7 @@ class RepeatedTimer:
         .. [SO474528] https://stackoverflow.com/questions/474528/execute-function-every-x-seconds/40965385#40965385
     """  # noqa: E501
     def __init__(self, interval, dump_func, outfile):
-        self._timer = None
+        self._timer: threading.Timer | None = None
         self.interval = interval
         self.dump_func = dump_func
         self.outfile = outfile
@@ -303,7 +308,8 @@ class RepeatedTimer:
             self.is_running = True
 
     def stop(self):
-        self._timer.cancel()
+        if self._timer is not None:
+            self._timer.cancel()
         self.is_running = False
 
 
@@ -322,6 +328,7 @@ def find_module_script(module_name, *, static=True, exit_on_error=True):
         fname = mod_spec.origin  # type: str | None
         if fname and os.path.exists(fname):
             return fname
+        return None
 
     get_module_path = modname_to_modpath if static else resolve_module_path
 
@@ -686,7 +693,7 @@ def _add_core_parser_arguments(parser):
 
 
 def _build_parsers(args=None):
-    parser_kwargs = {
+    parser_kwargs: dict[str, Any] = {
         'description': 'Run and profile a python script.',
     }
 
@@ -818,9 +825,7 @@ def _parse_arguments(
     # Reinitialize the diagnostic logs, we are very likely the main script.
     diagnostics.log = Logger(**logger_kwargs)
     if options.rich:
-        try:
-            import rich  # noqa: F401
-        except ImportError:
+        if importlib.util.find_spec('rich') is None:
             options.rich = False
             diagnostics.log.debug('`rich` not installed, unsetting --rich')
 
@@ -875,8 +880,9 @@ def main(args=None, *, exit_on_error=True):
                 _remove, tmpdir, recursive=True, missing_ok=True,
             )
         if tempfile_source_and_content:
+            source, content = tempfile_source_and_content
             try:
-                _write_tempfile(*tempfile_source_and_content, options)
+                _write_tempfile(source, content, options)
             except Exception:
                 # Tempfile creation failed, delete the tempdir ASAP
                 cleanup()
@@ -994,8 +1000,7 @@ def _write_preimports(prof, options, exclude):
     not to be invoked on its own.
     """
     from line_profiler.autoprofile.eager_preimports import write_eager_import_module
-    from line_profiler.autoprofile.autoprofile import (
-        _extend_line_profiler_for_profiling_imports as upgrade_profiler)
+    from line_profiler.autoprofile import autoprofile as autoprofile_mod
 
     filtered_targets, recurse_targets = _gather_preimport_targets(options, exclude)
     if not (filtered_targets or recurse_targets):
@@ -1003,6 +1008,10 @@ def _write_preimports(prof, options, exclude):
     # We could've done everything in-memory with `io.StringIO` and `exec()`,
     # but that results in indecipherable tracebacks should anything goes wrong;
     # so we write to a tempfile and `execfile()` it
+    upgrade_profiler = getattr(
+        autoprofile_mod,
+        '_extend_line_profiler_for_profiling_imports',
+    )
     upgrade_profiler(prof)
     temp_mod_path = _touch_tempfile(dir=options.tmpdir,
                                     prefix='kernprof-eager-preimports-',
@@ -1165,13 +1174,13 @@ def _pre_profile(options, module, exit_on_error):
     else:
         prof = ContextualProfile()
 
-    # Overwrite the explicit decorator
-    global_profiler = line_profiler.profile
-    install_profiler = global_profiler._kernprof_overwrite
-    install_profiler(prof)
-
-    if options.builtin:
-        builtins.__dict__['profile'] = prof
+    if isinstance(prof, line_profiler.LineProfiler):
+        # Overwrite the explicit decorator
+        global_profiler = line_profiler.profile
+        install_profiler = global_profiler._kernprof_overwrite
+        install_profiler(prof)
+        if options.builtin:
+            builtins.__dict__['profile'] = prof
 
     if module:
         script_file = find_module_script(

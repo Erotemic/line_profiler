@@ -172,13 +172,14 @@ import sys
 import typing
 from typing import Any, Callable
 
+from .line_profiler import LineProfiler
+
 if typing.TYPE_CHECKING:
     ConfigArg = str | pathlib.PurePath | bool | None
 
 
 # This is for compatibility
 from .cli_utils import boolean, get_python_executable as _python_command
-from .line_profiler import LineProfiler
 from .toml_config import ConfigSource
 
 # The first process that enables profiling records its PID here. Child processes
@@ -288,7 +289,7 @@ class GlobalProfiler:
         config_source = ConfigSource.from_config(config)
         self._config = config_source.path
 
-        self._profile = None
+        self._profile: LineProfiler | None = None
         self._owner_pid = None
         self.enabled = None
         # Configs:

@@ -75,7 +75,8 @@ class AstTreeModuleProfiler(AstTreeProfiler):
     """
     @classmethod
     def _get_script_ast_tree(cls, script_file):
-        tree = super()._get_script_ast_tree(script_file)
+        get_tree = getattr(AstTreeProfiler, '_get_script_ast_tree')
+        tree = get_tree(script_file)
         # Note: don't drop the `.__init__` or `.__main__` suffix, lest
         # the relative imports fail
         module = modpath_to_modname(script_file,

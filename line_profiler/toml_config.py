@@ -120,7 +120,11 @@ class ConfigSource:
 
         global _DEFAULTS
         if _DEFAULTS is None:
-            package = __spec__.name.rpartition('.')[0]
+            spec = __spec__
+            if spec is None or spec.name is None:
+                package = cls.__module__.rpartition('.')[0]
+            else:
+                package = spec.name.rpartition('.')[0]
             with find_file(package + '.rc', 'line_profiler.toml') as path:
                 conf_dict, source = find_and_read_config_file(config=path)
             conf_dict = get_subtable(conf_dict, NAMESPACE, allow_absence=False)

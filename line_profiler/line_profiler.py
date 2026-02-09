@@ -5,6 +5,8 @@ inspect its output. This depends on the :py:mod:`line_profiler._line_profiler`
 Cython backend.
 """
 import functools
+import importlib
+import importlib.util
 import inspect
 import linecache
 import operator
@@ -482,12 +484,12 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
 
     def _add_namespace(
             self, namespace, *,
-            seen=None,
-            func_scoping_policy=ScopingPolicy.NONE,
-            class_scoping_policy=ScopingPolicy.NONE,
-            module_scoping_policy=ScopingPolicy.NONE,
-            wrap=False,
-            name=None):
+            seen: set[int] | None = None,
+            func_scoping_policy: ScopingPolicy = ScopingPolicy.NONE,
+            class_scoping_policy: ScopingPolicy = ScopingPolicy.NONE,
+            module_scoping_policy: ScopingPolicy = ScopingPolicy.NONE,
+            wrap: bool = False,
+            name: str | None = None):
         def func_guard(func):
             return self._already_a_wrapper(func) or not func_check(func)
 
@@ -749,16 +751,16 @@ def show_func(filename, start_lineno, func_name, timings, unit,
         return
 
     if rich:
-        # References:
-        # https://github.com/Textualize/rich/discussions/3076
-        try:
-            from rich.syntax import Syntax
-            from rich.highlighter import ReprHighlighter
-            from rich.text import Text
-            from rich.console import Console
-            from rich.table import Table
-        except ImportError:
+        if importlib.util.find_spec('rich') is None:
             rich = 0
+        else:
+            # References:
+            # https://github.com/Textualize/rich/discussions/3076
+            Syntax = importlib.import_module('rich.syntax').Syntax
+            ReprHighlighter = importlib.import_module('rich.highlighter').ReprHighlighter
+            Text = importlib.import_module('rich.text').Text
+            Console = importlib.import_module('rich.console').Console
+            Table = importlib.import_module('rich.table').Table
 
     if output_unit is None:
         output_unit = unit
@@ -938,12 +940,11 @@ def show_text(stats, unit, output_unit=None, stream=None, stripzeros=False,
 
     if summarize:
         # Summarize the total time for each function
+        if rich and importlib.util.find_spec('rich') is None:
+            rich = 0
         if rich:
-            try:
-                from rich.console import Console
-                from rich.markup import escape
-            except ImportError:
-                rich = 0
+            Console = importlib.import_module('rich.console').Console
+            escape = importlib.import_module('rich.markup').escape
         line_template = '%6.2f seconds - %s:%s - %s'
         if rich:
             write_console = Console(file=stream, soft_wrap=True,

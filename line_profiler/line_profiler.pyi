@@ -8,7 +8,7 @@ from typing import (TYPE_CHECKING,
                     Literal, Self,
                     Protocol, TypeVar)
 try:
-    from typing import (  # type: ignore[attr-defined]  # noqa: F401
+    from typing import (  # noqa: F401
         ParamSpec)
 except ImportError:
     from typing_extensions import ParamSpec  # noqa: F401
@@ -75,23 +75,23 @@ class LineStats(CLineStats):
 
 class LineProfiler(CLineProfiler, ByCountProfilerMixin):
     @overload
-    def __call__(self,  # type: ignore[overload-overlap]
+    def __call__(self,
                  func: CLevelCallable) -> CLevelCallable:
         ...
 
     @overload
-    def __call__(  # type: ignore[overload-overlap]
+    def __call__(
         self, func: UnparametrizedCallableLike,
     ) -> UnparametrizedCallableLike:
         ...
 
     @overload
-    def __call__(self,  # type: ignore[overload-overlap]
+    def __call__(self,
                  func: type[T]) -> type[T]:
         ...
 
     @overload
-    def __call__(self,  # type: ignore[overload-overlap]
+    def __call__(self,
                  func: partial[T]) -> partial[T]:
         ...
 
@@ -104,7 +104,7 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         ...
 
     @overload
-    def __call__(self,  # type: ignore[overload-overlap]
+    def __call__(self,
                  func: staticmethod[PS, T_co]) -> staticmethod[PS, T_co]:
         ...
 
@@ -133,15 +133,15 @@ class LineProfiler(CLineProfiler, ByCountProfilerMixin):
         ...
 
     def print_stats(self,
-                    stream: Incomplete | None = ...,
-                    output_unit: Incomplete | None = ...,
+                    stream: object | None = ...,
+                    output_unit: object | None = ...,
                     stripzeros: bool = ...,
                     details: bool = ...,
                     summarize: bool = ...,
-                    sort: bool = ...,
+                    sort: bool | str | int = ...,
                     rich: bool = ...,
                     *,
-                    config: str | PathLike[str] | bool | None = None) -> None:
+                    config: object | None = ...) -> None:
         ...
 
     def add_module(

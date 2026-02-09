@@ -188,9 +188,11 @@ def get_python_executable():
             Command or path thereto corresponding to
             :py:data:`sys.executable`.
     """
-    if os.path.samefile(shutil.which('python'), sys.executable):
+    python_path = shutil.which('python')
+    if python_path and os.path.samefile(python_path, sys.executable):
         return 'python'
-    elif os.path.samefile(shutil.which('python3'), sys.executable):
+    python3_path = shutil.which('python3')
+    if python3_path and os.path.samefile(python3_path, sys.executable):
         return 'python3'
     else:
         return short_string_path(sys.executable)

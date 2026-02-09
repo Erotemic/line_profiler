@@ -5,11 +5,11 @@ from .line_profiler_utils import StringEnum
 
 
 class ScopingPolicy(StringEnum):
-    EXACT = auto()
-    CHILDREN = auto()
-    DESCENDANTS = auto()
-    SIBLINGS = auto()
-    NONE = auto()
+    EXACT: 'ScopingPolicy'
+    CHILDREN: 'ScopingPolicy'
+    DESCENDANTS: 'ScopingPolicy'
+    SIBLINGS: 'ScopingPolicy'
+    NONE: 'ScopingPolicy'
 
     @overload
     def get_filter(

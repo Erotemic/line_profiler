@@ -46,6 +46,18 @@ archs = ['AMD64', 'ARM64']
 
 [tool.mypy]
 ignore_missing_imports = true
+exclude = "^(tests|docs|dev)/"
+
+[tool.ty]
+
+[tool.ty.src]
+exclude = [
+    "dev/",
+    "docs/",
+    "tests/",
+    "setup.py",
+    "run_tests.py",
+]
 
 [tool.xcookie]
 tags = [ "pyutils", "binpy", "github",]

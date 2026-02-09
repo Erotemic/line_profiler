@@ -86,6 +86,12 @@ class ByCountProfilerMixin:
     Used by :py:class:`line_profiler.line_profiler.LineProfiler` and
     :py:class:`kernprof.ContextualProfile`.
     """
+    def enable_by_count(self, subcalls=True, builtins=True):
+        raise NotImplementedError
+
+    def disable_by_count(self):
+        raise NotImplementedError
+
     def wrap_callable(self, func):
         """
         Decorate a function to start the profiler on function entry and
@@ -515,4 +521,4 @@ class ByCountProfilerMixin:
         self.disable_by_count()
 
     _profiler_wrapped_marker = '__line_profiler_id__'
-    _class_scoping_policy = ScopingPolicy.CHILDREN
+    _class_scoping_policy: ScopingPolicy = ScopingPolicy.CHILDREN

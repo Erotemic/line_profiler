@@ -43,23 +43,100 @@ import time
 import types
 from contextlib import ExitStack
 from dataclasses import dataclass
+from io import StringIO
+import importlib.util
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 if TYPE_CHECKING:  # pragma: no cover
-    from typing import (Callable, ParamSpec,  # noqa: F401
-                        Any, ClassVar, TypeVar)
+    from typing import (Any, Callable, ClassVar, ParamSpec, TypeVar)
 
     PS = ParamSpec('PS')
     PD = TypeVar('PD', bound='_PatchDict')
     DefNode = TypeVar('DefNode', ast.FunctionDef, ast.AsyncFunctionDef)
 
-from io import StringIO
+    class Struct:
+        D: list[str]
+        T: list[str]
+        u: list[str] | None
 
-from IPython.core.getipython import get_ipython
-from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
-from IPython.core.page import page
-from IPython.utils.ipstruct import Struct
-from IPython.core.error import UsageError
+        def __init__(self, **kwargs: Any) -> None:
+            ...
+
+        def merge(self, other: 'Struct') -> None:
+            ...
+
+        def __contains__(self, key: object) -> bool:
+            ...
+
+    class Magics:
+        shell: Any
+
+        def parse_options(self, *args: Any, **kwargs: Any) -> tuple[Struct, str]:
+            ...
+
+    def magics_class(cls: type[Any]) -> type[Any]:
+        ...
+
+    def line_magic(func: Callable[..., Any]) -> Callable[..., Any]:
+        ...
+
+    def cell_magic(func: Callable[..., Any]) -> Callable[..., Any]:
+        ...
+
+    def page(*args: Any, **kwargs: Any) -> None:
+        ...
+
+    class UsageError(Exception):
+        ...
+
+    def get_ipython() -> Any:
+        ...
+else:
+    _ipython_spec = importlib.util.find_spec('IPython')
+    if _ipython_spec is None:
+        class Struct:
+            def __init__(self, **kwargs):
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+            def merge(self, other):
+                for key, value in other.__dict__.items():
+                    setattr(self, key, value)
+
+            def __contains__(self, key):
+                return hasattr(self, key)
+
+        class Magics:
+            def parse_options(self, *args, **kwargs):
+                return Struct(), ''
+
+            pass
+            def __init__(self, *args, **kwargs):
+                self.shell = None
+
+        def magics_class(cls):
+            return cls
+
+        def line_magic(func):
+            return func
+
+        def cell_magic(func):
+            return func
+
+        def page(*_args, **_kwargs) -> None:
+            return None
+
+        class UsageError(Exception):
+            pass
+
+        def get_ipython():
+            return None
+    else:
+        from IPython.core.getipython import get_ipython
+        from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
+        from IPython.core.page import page
+        from IPython.utils.ipstruct import Struct
+        from IPython.core.error import UsageError
 
 from line_profiler import line_profiler, LineProfiler, LineStats
 from line_profiler.autoprofile.ast_tree_profiler import AstTreeProfiler
@@ -530,7 +607,7 @@ class LineProfilerMagics(Magics):
                 # - `prof.add_function()` might have replaced the code
                 #   object, so retrieve it back from the dummy function
                 mock_func = types.SimpleNamespace(__code__=code)
-                prof.add_function(mock_func)  # type: ignore[arg-type]
+                prof.add_function(mock_func)
                 code = mock_func.__code__
                 # Notes:
                 # - We don't define `ip.user_global_ns` and `ip.user_ns`

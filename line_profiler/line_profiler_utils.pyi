@@ -1,6 +1,6 @@
-import enum
+from typing import Any, ClassVar
 try:
-    from typing import Self  # type: ignore[attr-defined]  # noqa: F401
+    from typing import Self  # noqa: F401
 except ImportError:  # Python < 3.11
     from typing_extensions import Self  # noqa: F401
 
@@ -10,7 +10,9 @@ except ImportError:  # Python < 3.11
 # from), and complains that it has no members -- so silence that
 
 
-class StringEnum(str, enum.Enum):  # type: ignore[misc]
+class StringEnum(str):
+    __members__: ClassVar[dict[str, Any]]
+    value: str
     @staticmethod
     def _generate_next_value_(name: str, *_, **__) -> str:
         ...

@@ -1,5 +1,8 @@
-from IPython.core.magic import Magics
 from . import LineProfiler
+
+
+class Magics:
+    ...
 
 
 class LineProfilerMagics(Magics):

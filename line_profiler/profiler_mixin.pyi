@@ -6,17 +6,17 @@ from types import (CodeType, FunctionType, MethodType,
 from typing import (TYPE_CHECKING, overload,
                     Any, Callable, Mapping, Protocol, TypeVar)
 try:
-    from typing import (  # type: ignore[attr-defined]  # noqa: F401
+    from typing import (  # noqa: F401
         ParamSpec)
 except ImportError:  # Python < 3.10
     from typing_extensions import ParamSpec  # noqa: F401
 try:
-    from typing import (  # type: ignore[attr-defined]  # noqa: F401
+    from typing import (  # noqa: F401
         Self)
 except ImportError:  # Python < 3.11
     from typing_extensions import Self  # noqa: F401
 try:
-    from typing import (  # type: ignore[attr-defined]  # noqa: F401
+    from typing import (  # noqa: F401
         TypeIs)
 except ImportError:  # Python < 3.13
     from typing_extensions import TypeIs  # noqa: F401
@@ -161,27 +161,35 @@ def is_cached_property(f: Any) -> TypeIs[cached_property]:
 
 
 class ByCountProfilerMixin:
+    _profiler_wrapped_marker: str
+
+    def enable_by_count(self, subcalls: bool = True, builtins: bool = True) -> None:
+        ...
+
+    def disable_by_count(self) -> None:
+        ...
+
     def get_underlying_functions(self, func) -> list[FunctionType]:
         ...
 
     @overload
-    def wrap_callable(self,  # type: ignore[overload-overlap]
+    def wrap_callable(self,
                       func: CLevelCallable) -> CLevelCallable:
         ...
 
     @overload
-    def wrap_callable(  # type: ignore[overload-overlap]
+    def wrap_callable(
         self, func: UnparametrizedCallableLike,
     ) -> UnparametrizedCallableLike:
         ...
 
     @overload
-    def wrap_callable(self,  # type: ignore[overload-overlap]
+    def wrap_callable(self,
                       func: type[T]) -> type[T]:
         ...
 
     @overload
-    def wrap_callable(self,  # type: ignore[overload-overlap]
+    def wrap_callable(self,
                       func: partial[T]) -> partial[T]:
         ...
 
@@ -195,7 +203,7 @@ class ByCountProfilerMixin:
         ...
 
     @overload
-    def wrap_callable(self,  # type: ignore[overload-overlap]
+    def wrap_callable(self,
                       func: staticmethod[PS, T_co]) -> staticmethod[PS, T_co]:
         ...
 
@@ -208,7 +216,7 @@ class ByCountProfilerMixin:
     # Fallback: just return a wrapper function around a generic callable
 
     @overload
-    def wrap_callable(self, func: Callable) -> FunctionType:
+    def wrap_callable(self, func: Callable[..., object]) -> Callable[..., object]:
         ...
 
     def wrap_classmethod(
@@ -246,6 +254,15 @@ class ByCountProfilerMixin:
         ...
 
     def wrap_function(self, func: Callable) -> FunctionType:
+        ...
+
+    def _wrap_namespace_members(
+        self,
+        namespace: object,
+        members: Mapping[str, object],
+        *,
+        warning_stack_level: int = ...,
+    ) -> None:
         ...
 
     def wrap_class(self, func: type[T]) -> type[T]:
