@@ -208,6 +208,7 @@ from pprint import pformat
 from shlex import quote
 from textwrap import indent, dedent
 from types import MethodType, SimpleNamespace
+from typing import TYPE_CHECKING, Callable, TypedDict
 
 # NOTE: This version needs to be manually maintained in
 # line_profiler/line_profiler.py and line_profiler/__init__.py as well
@@ -215,10 +216,13 @@ __version__ = '5.0.2'
 
 # Guard the import of cProfile such that 3.x people
 # without lsprof can still use this script.
-try:
-    from cProfile import Profile
-except ImportError:
-    from profile import Profile  # type: ignore[assignment,no-redef]
+if TYPE_CHECKING:
+    from cProfile import Profile as Profile
+else:
+    try:
+        from cProfile import Profile as Profile
+    except ImportError:  # pragma: no cover - for build environments without cProfile
+        from profile import Profile as Profile
 
 import line_profiler
 from line_profiler.cli_utils import (
@@ -251,7 +255,7 @@ class ContextualProfile(ByCountProfilerMixin, Profile):
     """
 
     def __init__(self, *args, **kwds):
-        super(ByCountProfilerMixin, self).__init__(*args, **kwds)
+        Profile.__init__(self, *args, **kwds)
         self.enable_count = 0
 
     def __call__(self, func):
@@ -287,8 +291,13 @@ class RepeatedTimer:
         .. [SO474528] https://stackoverflow.com/questions/474528/execute-function-every-x-seconds/40965385#40965385
     """  # noqa: E501
 
-    def __init__(self, interval, dump_func, outfile):
-        self._timer = None
+    def __init__(
+        self,
+        interval: float,
+        dump_func: Callable[[str], None],
+        outfile: str,
+    ) -> None:
+        self._timer: threading.Timer | None = None
         self.interval = interval
         self.dump_func = dump_func
         self.outfile = outfile
@@ -296,12 +305,12 @@ class RepeatedTimer:
         self.next_call = time.time()
         self.start()
 
-    def _run(self):
+    def _run(self) -> None:
         self.is_running = False
         self.start()
         self.dump_func(self.outfile)
 
-    def start(self):
+    def start(self) -> None:
         if not self.is_running:
             self.next_call += self.interval
             self._timer = threading.Timer(
@@ -310,17 +319,20 @@ class RepeatedTimer:
             self._timer.start()
             self.is_running = True
 
-    def stop(self):
-        self._timer.cancel()
+    def stop(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
         self.is_running = False
 
 
-def find_module_script(module_name, *, static=True, exit_on_error=True):
+def find_module_script(
+    module_name: str, *, static: bool = True, exit_on_error: bool = True
+) -> str:
     """Find the path to the executable script for a module or package."""
     from line_profiler.autoprofile.util_static import modname_to_modpath
     from importlib.util import find_spec
 
-    def resolve_module_path(mod_name):  # type: (str) -> str | None
+    def resolve_module_path(mod_name: str) -> str | None:
         try:
             mod_spec = find_spec(mod_name)
         except ImportError:
@@ -330,6 +342,7 @@ def find_module_script(module_name, *, static=True, exit_on_error=True):
         fname = mod_spec.origin  # type: str | None
         if fname and os.path.exists(fname):
             return fname
+        return None
 
     get_module_path = modname_to_modpath if static else resolve_module_path
 
@@ -346,7 +359,7 @@ def find_module_script(module_name, *, static=True, exit_on_error=True):
         raise ModuleNotFoundError(msg)
 
 
-def find_script(script_name, *, exit_on_error=True):
+def find_script(script_name: str, *, exit_on_error: bool = True) -> str:
     """Find the script.
 
     If the input is not a file, then :envvar:`PATH` will be searched.
@@ -402,6 +415,16 @@ def _normalize_profiling_targets(targets):
             filename = find(subchunk)
             results.setdefault(subchunk if filename is None else filename)
     return list(results)
+
+
+class _SpecialInfo(TypedDict):
+    module: str | None
+    literal_code: str | None
+    post_args: list[str]
+    args: list[str]
+
+
+TempfileSourceAndContent = tuple[str, str]
 
 
 class _restore:
@@ -773,10 +796,10 @@ def _add_core_parser_arguments(parser):
     )
 
 
-def _build_parsers(args=None):
-    parser_kwargs = {
-        'description': 'Run and profile a python script.',
-    }
+def _build_parsers(
+    args: list[str] | None = None,
+) -> tuple[ArgumentParser, ArgumentParser | None, _SpecialInfo]:
+    description = 'Run and profile a python script.'
 
     if args is None:
         args = sys.argv[1:]
@@ -797,7 +820,7 @@ def _build_parsers(args=None):
         module, literal_code = None, thing
 
     if module is literal_code is None:  # Normal execution
-        (real_parser,) = parsers = [ArgumentParser(**parser_kwargs)]
+        (real_parser,) = parsers = [ArgumentParser(description=description)]
         help_parser = None
     else:
         # We've already consumed the `-m <module>`, so we need a dummy
@@ -805,9 +828,9 @@ def _build_parsers(args=None):
         # but the real parser should not consume the `options.script`
         # positional arg, and it it got the `--help` option, it should
         # hand off the the dummy parser
-        real_parser = ArgumentParser(add_help=False, **parser_kwargs)
+        real_parser = ArgumentParser(add_help=False, description=description)
         real_parser.add_argument('-h', '--help', action='store_true')
-        help_parser = ArgumentParser(**parser_kwargs)
+        help_parser = ArgumentParser(description=description)
         parsers = [real_parser, help_parser]
     for parser in parsers:
         _add_core_parser_arguments(parser)
@@ -822,7 +845,7 @@ def _build_parsers(args=None):
         add_argument(
             parser, 'args', nargs='...', help='Optional script arguments'
         )
-    special_info = {
+    special_info: _SpecialInfo = {
         'module': module,
         'literal_code': literal_code,
         'post_args': post_args,
@@ -832,8 +855,12 @@ def _build_parsers(args=None):
 
 
 def _parse_arguments(
-    real_parser, help_parser, special_info, args, exit_on_error
-):
+    real_parser: ArgumentParser,
+    help_parser: ArgumentParser | None,
+    special_info: _SpecialInfo,
+    args: list[str],
+    exit_on_error: bool,
+) -> tuple[SimpleNamespace, TempfileSourceAndContent | None] | None:
 
     module = special_info['module']
     literal_code = special_info['literal_code']
@@ -854,7 +881,7 @@ def _parse_arguments(
         elif e.code:
             raise RuntimeError from None
         else:
-            return
+            return None
     # TODO: make flags later where appropriate
     options.dryrun = diagnostics.NO_EXEC
     options.static = diagnostics.STATIC_ANALYSIS
@@ -863,7 +890,7 @@ def _parse_arguments(
         if exit_on_error:
             raise SystemExit(0)
         else:
-            return
+            return None
 
     # Parse the provided config file (if any), and resolve the values
     # of the un-specified options
@@ -883,7 +910,7 @@ def _parse_arguments(
     if module is not None:
         options.script = module
 
-    tempfile_source_and_content = None
+    tempfile_source_and_content: TempfileSourceAndContent | None = None
     if literal_code is not None:
         tempfile_source_and_content = 'command', literal_code
     elif options.script == '-' and not module:
@@ -894,7 +921,7 @@ def _parse_arguments(
     options.debug = (
         diagnostics.DEBUG or options.verbose >= DIAGNOSITICS_VERBOSITY
     )
-    logger_kwargs = {'name': 'kernprof'}
+    logger_kwargs: dict[str, object] = {'name': 'kernprof'}
     logger_kwargs['backend'] = 'auto'
     if options.debug:
         # Debugging forces the stdlib logger
@@ -938,9 +965,12 @@ def main(args=None, *, exit_on_error=True):
     args = special_info['args']
     module = special_info['module']
 
-    options, tempfile_source_and_content = _parse_arguments(
+    parsed = _parse_arguments(
         real_parser, help_parser, special_info, args, exit_on_error
     )
+    if parsed is None:
+        return None
+    options, tempfile_source_and_content = parsed
 
     if module is not None:
         diagnostics.log.debug(f'Profiling module: {module}')

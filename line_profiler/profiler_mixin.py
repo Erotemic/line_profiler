@@ -10,13 +10,11 @@ from typing import (
     Any,
     Callable,
     Mapping,
-    Protocol,
     TypeVar,
     cast,
     Sequence,
 )
 from warnings import warn
-from ._line_profiler import label
 from .scoping_policy import ScopingPolicy
 
 
@@ -43,7 +41,7 @@ C_LEVEL_CALLABLE_TYPES = (
 _CANNOT_LINE_TRACE_CYTHON = (3, 12) <= version_info < (3, 13, 0, 'beta', 1)
 
 if TYPE_CHECKING:
-    from typing_extensions import ParamSpec, TypeIs
+    from typing_extensions import TypeIs
 
     UnparametrizedCallableLike = TypeVar(
         'UnparametrizedCallableLike',
@@ -52,83 +50,8 @@ if TYPE_CHECKING:
         types.MethodType,
     )
     T = TypeVar('T')
-    T_co = TypeVar('T_co', covariant=True)
-    PS = ParamSpec('PS')
 
-    class CythonCallable(Protocol[PS, T_co]):
-        def __call__(self, *args: PS.args, **kwargs: PS.kwargs) -> T_co: ...
-
-        @property
-        def __code__(self) -> types.CodeType: ...
-
-        @property
-        def func_code(self) -> types.CodeType: ...
-
-        @property
-        def __name__(self) -> str: ...
-
-        @property
-        def func_name(self) -> str: ...
-
-        @property
-        def __qualname__(self) -> str: ...
-
-        @property
-        def __doc__(self) -> str | None: ...
-
-        @__doc__.setter
-        def __doc__(self, doc: str | None) -> None: ...
-
-        @property
-        def func_doc(self) -> str | None: ...
-
-        @property
-        def __globals__(self) -> dict[str, Any]: ...
-
-        @property
-        def func_globals(self) -> dict[str, Any]: ...
-
-        @property
-        def __dict__(self) -> dict[str, Any]: ...
-
-        @__dict__.setter
-        def __dict__(self, dict: dict[str, Any]) -> None: ...
-
-        @property
-        def func_dict(self) -> dict[str, Any]: ...
-
-        @property
-        def __annotations__(self) -> dict[str, Any]: ...
-
-        @__annotations__.setter
-        def __annotations__(self, annotations: dict[str, Any]) -> None: ...
-
-        @property
-        def __defaults__(self): ...
-
-        @property
-        def func_defaults(self): ...
-
-        @property
-        def __kwdefaults__(self): ...
-
-        @property
-        def __closure__(self): ...
-
-        @property
-        def func_closure(self): ...
-else:
-    CythonCallable = type(label)
-
-CLevelCallable = TypeVar(
-    'CLevelCallable',
-    types.BuiltinFunctionType,
-    types.BuiltinMethodType,
-    types.ClassMethodDescriptorType,
-    types.MethodDescriptorType,
-    types.MethodWrapperType,
-    types.WrapperDescriptorType,
-)
+from .typing import CLevelCallable, CythonCallable
 
 
 def is_c_level_callable(func: Any) -> TypeIs[CLevelCallable]:

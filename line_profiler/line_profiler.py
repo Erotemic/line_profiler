@@ -27,7 +27,6 @@ from typing import (
     Callable,
     Literal,
     Mapping,
-    Protocol,
     Sequence,
     TypeVar,
     cast,
@@ -54,15 +53,12 @@ from .cli_utils import (
 from .profiler_mixin import ByCountProfilerMixin, is_c_level_callable
 from .scoping_policy import ScopingPolicy, ScopingPolicyDict
 from .toml_config import ConfigSource
+from .typing import IPythonLike, StatsLike, TimingsMap
 
 if TYPE_CHECKING:  # pragma: no cover
     from typing_extensions import ParamSpec, Self
 
-    class _IPythonLike(Protocol):
-        def register_magics(self, magics: type) -> None: ...
-
     PS = ParamSpec('PS')
-    _TimingsMap = Mapping[Tuple[str, int, str], list[Tuple[int, int, int]]]
     T = TypeVar('T')
     T_co = TypeVar('T_co', covariant=True)
 
@@ -99,7 +95,7 @@ def load_ipython_extension(ip: object) -> None:
     from .ipython_extension import LineProfilerMagics
 
     if TYPE_CHECKING:
-        ip = cast(_IPythonLike, ip)
+        ip = cast(IPythonLike, ip)
     ip.register_magics(LineProfilerMagics)
 
 
@@ -242,16 +238,12 @@ class _WrapperInfo:
         self.profiler_id = profiler_id
 
 
-class _StatsLike(Protocol):
-    timings: _TimingsMap
-    unit: float
-
 
 class LineStats(CLineStats):
-    timings: _TimingsMap
+    timings: TimingsMap
     unit: float
 
-    def __init__(self, timings: _TimingsMap, unit: float) -> None:
+    def __init__(self, timings: TimingsMap, unit: float) -> None:
         super().__init__(timings, unit)
 
     def __repr__(self) -> str:
@@ -286,7 +278,7 @@ class LineStats(CLineStats):
                 return NotImplemented
         return True
 
-    def __add__(self, other: _StatsLike) -> Self:
+    def __add__(self, other: StatsLike) -> Self:
         """
         Example:
             >>> stats1 = LineStats(
@@ -310,7 +302,7 @@ class LineStats(CLineStats):
         timings, unit = self._get_aggregated_timings([self, other])
         return type(self)(timings, unit)
 
-    def __iadd__(self, other: _StatsLike) -> Self:
+    def __iadd__(self, other: StatsLike) -> Self:
         """
         Example:
             >>> stats1 = LineStats(
@@ -382,7 +374,7 @@ class LineStats(CLineStats):
 
     @classmethod
     def from_stats_objects(
-        cls, stats: _StatsLike, /, *more_stats: _StatsLike
+        cls, stats: StatsLike, /, *more_stats: StatsLike
     ) -> Self:
         """
         Example:
@@ -1093,7 +1085,7 @@ def show_func(
 
 
 def show_text(
-    stats: _TimingsMap,
+    stats: TimingsMap,
     unit: float,
     output_unit: float | None = None,
     stream: io.TextIOBase | None = None,

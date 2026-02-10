@@ -50,6 +50,16 @@ archs = ['AMD64', 'ARM64']
 
 [tool.mypy]
 ignore_missing_imports = true
+exclude = '^(tests|docs|dev)/'
+
+[tool.ty.src]
+exclude = [
+  "dev/**",
+  "docs/**",
+  "run_tests.py",
+  "setup.py",
+  "tests/**",
+]
 
 [tool.xcookie]
 tags = [ "pyutils", "binpy", "github",]
@@ -92,6 +102,18 @@ include = [
   "line_profiler/line_profiler_utils.py",
 ]
 rules = { unused-type-ignore-comment = "ignore" }
+
+[[tool.ty.overrides]]
+include = [
+  "line_profiler/ipython_extension.py",
+]
+rules = { unresolved-import = "ignore" }
+
+[[tool.ty.overrides]]
+include = [
+  "kernprof.py",
+]
+rules = { unresolved-import = "ignore" }
 
 [tool.ruff]
 line-length = 80

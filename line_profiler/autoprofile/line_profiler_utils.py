@@ -6,7 +6,7 @@ from types import FunctionType, MethodType, ModuleType
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:  # pragma: no cover
-    from ..profiler_mixin import CLevelCallable, CythonCallable
+    from ..typing import CLevelCallable, CythonCallable
     from ..scoping_policy import ScopingPolicy, ScopingPolicyDict
 
 
