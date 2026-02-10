@@ -171,7 +171,7 @@ import os
 import pathlib
 import sys
 import typing
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
 if typing.TYPE_CHECKING:
     ConfigArg = str | pathlib.PurePath | bool | None
@@ -180,9 +180,8 @@ if typing.TYPE_CHECKING:
 # This is for compatibility
 from .cli_utils import boolean, get_python_executable as _python_command
 from .line_profiler import LineProfiler
+from .typing import ProfileProtocol
 from .toml_config import ConfigSource
-
-F = TypeVar('F', bound=Callable[..., Any])
 
 # The first process that enables profiling records its PID here. Child processes
 # created via multiprocessing (spawn/forkserver) inherit this environment value,
@@ -277,7 +276,7 @@ class GlobalProfiler:
     """
 
     _config: pathlib.PurePath | None
-    _profile: LineProfiler | None
+    _profile: ProfileProtocol | None
     _owner_pid: int | None
     enabled: bool | None
 
@@ -309,7 +308,7 @@ class GlobalProfiler:
         # supplied `config`)
         self.show_config.pop('column_widths')
 
-    def _kernprof_overwrite(self, profile: LineProfiler) -> None:
+    def _kernprof_overwrite(self, profile: ProfileProtocol) -> None:
         """
         Kernprof will call this when it runs, so we can use its profile object
         instead of our own. Note: when kernprof overwrites us we wont register
@@ -449,9 +448,7 @@ class GlobalProfiler:
         if not self.enabled:
             return func
         assert self._profile is not None
-
-        wrapped = self._profile(func)
-        return wrapped
+        return self._profile(func)
 
     def show(self) -> None:
         """
@@ -476,10 +473,11 @@ class GlobalProfiler:
         write_lprof = self.write_config['lprof']
 
         assert self._profile is not None
+        profile = self._profile
 
         kwargs: dict[str, Any] = {'config': self._config, **self.show_config}
         if write_stdout:
-            self._profile.print_stats(**kwargs)
+            profile.print_stats(**kwargs)
 
         if write_text or write_timestamped_text:
             stream = io.StringIO()
@@ -489,7 +487,7 @@ class GlobalProfiler:
                 'rich': False,
                 'details': True,
             }
-            self._profile.print_stats(stream=stream, **text_kwargs)
+            profile.print_stats(stream=stream, **text_kwargs)
             raw_text = stream.getvalue()
 
             if write_text:
@@ -510,7 +508,7 @@ class GlobalProfiler:
 
         if write_lprof:
             lprof_output_fpath = pathlib.Path(f'{self.output_prefix}.lprof')
-            self._profile.dump_stats(lprof_output_fpath)
+            profile.dump_stats(lprof_output_fpath)
             print('Wrote profile results to %s' % lprof_output_fpath)
             print('To view details run:')
             py_exe = _python_command()

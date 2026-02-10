@@ -46,20 +46,11 @@ import types
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Union
+from typing import Any, Callable, ParamSpec, TypeVar, Union
 
-if TYPE_CHECKING:  # pragma: no cover
-    from typing import (
-        Callable,
-        ParamSpec,  # noqa: F401
-        Any,
-        ClassVar,
-        TypeVar,
-    )
-
-    PS = ParamSpec('PS')
-    PD = TypeVar('PD', bound='_PatchDict')
-    DefNode = TypeVar('DefNode', ast.FunctionDef, ast.AsyncFunctionDef)
+PS = ParamSpec('PS')
+PD = TypeVar('PD', bound='_PatchDict')
+DefNode = TypeVar('DefNode', ast.FunctionDef, ast.AsyncFunctionDef)
 
 from io import StringIO
 
@@ -113,26 +104,26 @@ class _ParseParamResult:
     opts: Struct
     arg_str: str
 
-    def __getattr__(self, attr):  # type: (str) -> Any
+    def __getattr__(self, attr: str) -> Any:
         """Defers to :py:attr:`_ParseParamResult.opts`."""
         return getattr(self.opts, attr)
 
     @functools.cached_property
-    def dump_raw_dest(self):  # type: () -> Path | None
+    def dump_raw_dest(self) -> Path | None:
         path = self.opts.D[0]
         if path:
             return Path(path)
         return None
 
     @functools.cached_property
-    def dump_text_dest(self):  # type: () -> Path | None
+    def dump_text_dest(self) -> Path | None:
         path = self.opts.T[0]
         if path:
             return Path(path)
         return None
 
     @functools.cached_property
-    def output_unit(self):  # type: () -> float | None
+    def output_unit(self) -> float | None:
         if self.opts.u is None:
             return None
         try:
@@ -141,11 +132,11 @@ class _ParseParamResult:
             raise TypeError('Timer unit setting must be a float.')
 
     @functools.cached_property
-    def strip_zero(self):  # type: () -> bool
+    def strip_zero(self) -> bool:
         return 'z' in self.opts
 
     @functools.cached_property
-    def return_profiler(self):  # type: () -> bool
+    def return_profiler(self) -> bool:
         return 'r' in self.opts
 
 
@@ -207,7 +198,7 @@ class _RunAndProfileResult:
         return show_func_wrapper
 
     @functools.cached_property
-    def output(self):  # type: () -> str
+    def output(self) -> str:
         with ExitStack() as stack:
             cap = stack.enter_context(StringIO())  # Trap text output
             patch_show_func = _PatchDict.from_module(
@@ -247,34 +238,32 @@ class _PatchProfilerIntoBuiltins:
         can't be imported.
     """
 
-    def __init__(self, prof=None):
-        # type: (LineProfiler | None) -> None
+    def __init__(self, prof: LineProfiler | None = None) -> None:
         if prof is None:
             prof = LineProfiler()
         self.prof = prof
         self._ctx = _PatchDict.from_module(builtins, profile=self.prof)
 
-    def __enter__(self):  # type: () -> LineProfiler
+    def __enter__(self) -> LineProfiler:
         self._ctx.__enter__()
         return self.prof
 
-    def __exit__(self, *a, **k):
+    def __exit__(self, *a: object, **k: object) -> None:
         return self._ctx.__exit__(*a, **k)
 
 
 class _PatchDict:
-    def __init__(self, namespace, /, **kwargs):
-        # type: (dict[str, Any], Any) -> None
+    def __init__(self, namespace: dict[str, Any], /, **kwargs: Any) -> None:
         self.namespace = namespace
         self.replacements = kwargs
-        self._stack = []  # type: list[dict[str, Any]]
+        self._stack: list[dict[str, Any]] = []
         self._absent = object()
 
-    def __enter__(self):  # type: (PD) -> PD
+    def __enter__(self: PD) -> PD:
         self._push()
         return self
 
-    def __exit__(self, *_, **__):
+    def __exit__(self, *_, **__) -> None:
         self._pop()
 
     def _push(self):
@@ -296,15 +285,17 @@ class _PatchDict:
                 namespace[key] = value
 
     @classmethod
-    def from_module(cls, module, /, **kwargs):
-        # type: (type[PD], types.ModuleType, Any) -> PD
+    def from_module(
+        cls: type[PD], module: types.ModuleType, /, **kwargs: Any
+    ) -> PD:
         return cls(vars(module), **kwargs)
 
 
 @magics_class
 class LineProfilerMagics(Magics):
-    def _parse_parameters(self, parameter_s, getopt_spec, opts_def):
-        # type: (str, str, Struct) -> _ParseParamResult
+    def _parse_parameters(
+        self, parameter_s: str, getopt_spec: str, opts_def: Struct
+    ) -> _ParseParamResult:
         # FIXME: There is a chance that this handling will need to be
         # updated to handle single-quoted characters better (#382)
         parameter_s = parameter_s.replace('"', r'\"').replace("'", r'\"')
@@ -317,13 +308,13 @@ class LineProfilerMagics(Magics):
 
     @staticmethod
     def _run_and_profile(
-        prof,  # type: LineProfiler
-        parse_result,  # type: _ParseParamResult
-        tempfile,  # type: str | None
-        method,  # type: Callable[PS, Any]
-        *args,  # type: PS.args
-        **kwargs,  # type: PS.kwargs
-    ):  # type: (...) -> _RunAndProfileResult
+        prof: LineProfiler,
+        parse_result: _ParseParamResult,
+        tempfile: str | None,
+        method: Callable[PS, Any],
+        *args: PS.args,
+        **kwargs: PS.kwargs,
+    ) -> _RunAndProfileResult:
         # Use the time module because it's easier than parsing the
         # output from `show_text()`.
         # `perf_counter()` is a monotonically increasing alternative to
@@ -348,8 +339,9 @@ class LineProfilerMagics(Magics):
         )
 
     @classmethod
-    def _lprun_all_get_rewritten_profiled_code(cls, tmpfile):
-        # type: (str) -> types.CodeType
+    def _lprun_all_get_rewritten_profiled_code(
+        cls, tmpfile: str
+    ) -> types.CodeType:
         """Transform and compile the AST of the profiled code. This is
         similar to :py:meth:`.LineProfiler.runctx`,
         """
@@ -359,15 +351,17 @@ class LineProfilerMagics(Magics):
         return compile(tree, tmpfile, 'exec')
 
     @classmethod
-    def _lprun_get_top_level_profiled_code(cls, tmpfile):
-        # type: (str) -> types.CodeType
+    def _lprun_get_top_level_profiled_code(
+        cls, tmpfile: str
+    ) -> types.CodeType:
         """Compile the profiled code."""
         with open(tmpfile, mode='r') as fobj:
             return compile(fobj.read(), tmpfile, 'exec')
 
     @staticmethod
-    def _handle_end(prof, run_result):
-        # type: (LineProfiler, _RunAndProfileResult) -> LineProfiler | None
+    def _handle_end(
+        prof: LineProfiler, run_result: _RunAndProfileResult
+    ) -> LineProfiler | None:
         page(run_result.output)
 
         dump_file = run_result.parse_result.dump_raw_dest
