@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 import types
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    List,
+    Mapping,
+    Protocol,
+    Tuple,
+    TypeVar,
+)
 
 from ._line_profiler import label
 
@@ -89,7 +98,7 @@ CLevelCallable = TypeVar(
     types.WrapperDescriptorType,
 )
 
-TimingsMap = Mapping[tuple[str, int, str], list[tuple[int, int, int]]]
+TimingsMap = Mapping[Tuple[str, int, str], List[Tuple[int, int, int]]]
 
 
 class ProfileProtocol(Protocol):
